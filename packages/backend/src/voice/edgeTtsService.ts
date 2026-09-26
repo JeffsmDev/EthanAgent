@@ -29,13 +29,13 @@ export class EdgeTtsService {
   }
 
   // Conecta (con un reintento) y devuelve el stream de audio. El WebSocket se cierra al terminar el stream
-  async synthesizeToStream(text: string): Promise<Readable> {
+  async synthesizeToStream(text: string, rate?: string): Promise<Readable> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       const tts = new MsEdgeTTS();
       try {
         await withTimeout(tts.setMetadata(this.voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3), CONNECT_TIMEOUT_MS, 'Edge TTS');
-        const { audioStream } = tts.toStream(escapeSsml(text));
+        const { audioStream } = tts.toStream(escapeSsml(text), rate ? { rate } : undefined);
         let closed = false;
         const release = () => {
           if (closed) return;

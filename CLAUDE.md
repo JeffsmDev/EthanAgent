@@ -44,7 +44,7 @@ pnpm start                   # producción: backend sirve API + frontend en :400
 
 ## Convenciones
 
-- Formato de respuesta del tutor: `[SPOKEN RESPONSE]` (va a TTS) + `[NATIVE UPGRADE]` opcional + bloque ```json al cerrar el diagnóstico. El parseo vive en el backend (`src/agents/responseParser.ts`); no duplicarlo en el frontend.
+- Formato de respuesta del tutor: `[SPOKEN RESPONSE]` (único texto que va a TTS) + `[SPANISH]` + `[NATIVE UPGRADE]` opcional (con Pronunciation y Explicación) + `[STEP_STATUS]` (test) o `[SCORES]` (práctica) + bloque ```json al cerrar el diagnóstico. El parseo vive en el backend (`src/agents/responseParser.ts`); no duplicarlo en el frontend.
 - Errores del motor IA → HTTP 503 con `{ code, friendlyMessage }`; el frontend los muestra, nunca crashea.
 - El backend debe correr como **una sola instancia** (el store JSON no es multi-proceso).
 - El cambio de motor (`POST /api/engine`) solo elige entre motores ya configurados en el servidor: **nunca** aceptar keys/tokens desde el cliente.

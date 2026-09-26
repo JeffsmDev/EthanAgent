@@ -8,7 +8,8 @@ import path from 'node:path';
 // API) y no envía la voz del usuario a terceros. Conserva los errores gramaticales tal cual: clave para el tutor.
 // El frontend envía WAV PCM 16 kHz mono, el formato nativo de whisper.cpp (no hace falta ffmpeg).
 
-const TIMEOUT_MS = 45000;
+// Hasta 2 min de audio: en 2 vCPU whisper base.en tarda ~1/3 de la duración, con margen
+const TIMEOUT_MS = 120000;
 
 export class SttUnavailableError extends Error {}
 

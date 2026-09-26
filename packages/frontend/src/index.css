@@ -787,3 +787,314 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Traducción al español bajo cada respuesta de Ethan */
+.bubble-spanish {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* Tarjeta de corrección: escuchar, pronunciación y explicación */
+.upgrade-listen {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.upgrade-listen button {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-native);
+  cursor: pointer;
+}
+
+.upgrade-listen button:hover {
+  border-color: var(--color-native);
+}
+
+.upgrade-pronunciation {
+  font-size: 0.82rem;
+  color: var(--text-main);
+}
+
+.upgrade-pronunciation span {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.upgrade-es {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+/* Ajustes junto al micrófono */
+.dock-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 20px 14px;
+}
+
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.toggle-chip.on {
+  color: var(--color-native);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.toggle-chip select {
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.76rem;
+  padding: 2px 4px;
+}
+
+/* Guía del test de nivel */
+.stage-now {
+  margin: 14px 0 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.stage-now strong {
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.stage-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-primary);
+}
+
+.stage-note {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.step-indicator span {
+  text-align: center;
+}
+
+/* Tarjeta de nivel y progreso */
+.level-current {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.level-desc,
+.level-source,
+.level-explain,
+.focus-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.level-source {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.focus-label {
+  margin-top: 6px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.level-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.level-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--text-main);
+}
+
+.progress-track {
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.progress-track.small {
+  height: 6px;
+  flex: 1;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-primary), var(--color-native));
+  transition: width 0.6s ease;
+}
+
+.skill-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skill-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.skill-row > span {
+  width: 78px;
+}
+
+.skill-row em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  width: 34px;
+  text-align: right;
+}
+
+.level-up-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-native);
+  color: #04130d;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.level-actions,
+.level-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.level-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.level-option {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.level-option.selected {
+  border-color: var(--color-native);
+  color: var(--text-main);
+}
+
+.level-option strong {
+  color: var(--text-main);
+}
+
+.start-button.compact {
+  padding: 8px 18px;
+  margin-top: 0;
+  font-size: 0.85rem;
+}
+
+/* Resumen de la sesión */
+.recap-card {
+  align-self: stretch;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recap-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-native);
+}
+
+.recap-stats,
+.recap-empty,
+.recap-tip {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.recap-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.recap-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.recap-list em {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}

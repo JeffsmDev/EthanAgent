@@ -19,44 +19,42 @@ import {
   AlertTriangle,
   X,
   Play,
-  Loader2
+  Loader2,
+  Languages,
+  Timer,
+  Target
 } from 'lucide-react';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
+import type { DiagnosticResult, Message, NativeUpgrade, UserProgress } from './types';
+import { UpgradeCard } from './components/UpgradeCard';
+import { DiagnosticGuide } from './components/DiagnosticGuide';
+import { LevelCard } from './components/LevelCard';
+import { SessionRecap } from './components/SessionRecap';
 
-interface NativeUpgrade {
-  original: string;
-  native: string;
-  tip: string;
+// Preferencias del alumno en este navegador (si el almacenamiento falla, se usan los valores por defecto)
+function readPref(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(`ethan.${key}`) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(`ethan.${key}`, value);
+  } catch {
+    /* modo privado / almacenamiento bloqueado */
+  }
 }
 
-interface Message {
-  id: string;
-  sender: 'user' | 'tutor' | 'system';
-  text: string;
-  spokenText?: string;
-  upgrades?: NativeUpgrade[];
-}
-
-interface DiagnosticResult {
-  testCompleted?: boolean;
-  assignedLevel: string;
-  strengths: string[];
-  priorityAreas: string[];
-  firstSessionRecommendedTheme: string;
-}
-
-interface WeakPoint extends NativeUpgrade {
-  count: number;
-}
-
-interface UserProgress {
-  cefrLevel: string | null;
-  diagnostic: DiagnosticResult | null;
-  stats: { totalSessions: number; totalMinutes: number; totalUpgrades: number };
-  sessions: { id: string; topic: string; startedAt: string; durationMinutes: number }[];
-  weakPoints: WeakPoint[];
-}
+// Pausa de silencio antes de enviar la grabación (ms); 'manual' = solo al pulsar el micrófono
+const SILENCE_OPTIONS: { value: string; label: string }[] = [
+  { value: '2000', label: '2 s' },
+  { value: '4000', label: '4 s' },
+  { value: '6000', label: '6 s' },
+  { value: 'manual', label: 'Manual' }
+];
 
 type Mode = 'placement' | 'daily_session';
 
@@ -106,7 +104,8 @@ const PLACEMENT_WELCOME: Message = {
   id: 'welcome',
   sender: 'tutor',
   text: "Hey! Welcome aboard! I'm Ethan, your native English coach. Traditional classes waste time on dry theory—my goal is to get you speaking with natural flow, rhythm, and confidence. Let's start with a quick 4-step diagnostic to map your real baseline. Tell me a bit about yourself: what do you do, and what brings you here today?",
-  spokenText: "Hey! Welcome aboard! I'm Ethan, your native English coach. Let's start with a quick 4-step diagnostic to map your real baseline. Tell me a bit about yourself: what do you do, and what brings you here today?"
+  spokenText: "Hey! Welcome aboard! I'm Ethan, your native English coach. Let's start with a quick 4-step diagnostic to map your real baseline. Tell me a bit about yourself: what do you do, and what brings you here today?",
+  spanish: '¡Hola, bienvenido! Soy Ethan, tu coach de inglés nativo. Empecemos con un diagnóstico rápido de 4 etapas para conocer tu nivel real. Cuéntame un poco sobre ti: ¿a qué te dedicas y qué te trae por aquí hoy?'
 };
 
 function buildReturningWelcome(progress: UserProgress): Message {
@@ -119,7 +118,12 @@ function buildReturningWelcome(progress: UserProgress): Message {
       : '',
     theme ? `Today's focus: ${theme}. So, how's your day been so far?` : "So, how's your day been so far?"
   ].filter(Boolean).join(' ');
-  return { id: 'welcome-back', sender: 'tutor', text, spokenText: text };
+  const spanish = [
+    `¡Bienvenido de nuevo! Estás en nivel ${progress.cefrLevel}, así que sigamos donde lo dejamos.`,
+    weak ? `Recuerda: en lugar de "${weak.original}", di "${weak.native}".` : '',
+    theme ? `Enfoque de hoy: ${theme}. ¿Qué tal tu día hasta ahora?` : '¿Qué tal tu día hasta ahora?'
+  ].filter(Boolean).join(' ');
+  return { id: `welcome-back-${Date.now()}`, sender: 'tutor', text, spokenText: text, spanish };
 }
 
 // crypto.randomUUID solo existe en contextos seguros (https/localhost); en http por IP hay que tener respaldo
@@ -153,6 +157,11 @@ export function App() {
   // true = grabar y transcribir en el servidor (whisper.cpp): funciona en Brave/Firefox. false = Web Speech del navegador
   const [sttAvailable, setSttAvailable] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [showSpanish, setShowSpanish] = useState(() => readPref('showSpanish', 'true') === 'true');
+  const [silenceMode, setSilenceMode] = useState(() => readPref('silenceMode', '4000'));
+  const [levelBusy, setLevelBusy] = useState(false);
+  // Correcciones de la sesión en curso, para el resumen al cerrarla
+  const sessionUpgradesRef = useRef<NativeUpgrade[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -308,13 +317,13 @@ export function App() {
   };
 
   // Sintetizar y reproducir audio
-  const playAudio = (text: string) => {
+  const playAudio = (text: string, slow = false) => {
     if (!text) return;
     if (audioRef.current) {
       audioRef.current.pause();
     }
     window.speechSynthesis?.cancel();
-    const audioUrl = `/api/voice/synthesize?text=${encodeURIComponent(text)}`;
+    const audioUrl = `/api/voice/synthesize?text=${encodeURIComponent(text)}${slow ? '&rate=slow' : ''}`;
     const audio = new Audio(audioUrl);
     audioRef.current = audio;
 
@@ -345,7 +354,7 @@ export function App() {
   };
 
   const addSystemMessage = (text: string) => {
-    setMessages(prev => [...prev, { id: `sys-${Date.now()}`, sender: 'system', text }]);
+    setMessages(prev => [...prev, { id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, sender: 'system', text }]);
   };
 
   // Cierra la sesión actual en el backend y arranca una nueva (id nuevo + timer a cero)
@@ -369,6 +378,7 @@ export function App() {
     }
     sessionIdRef.current = newSessionId();
     sessionTurnsRef.current = 0;
+    sessionUpgradesRef.current = [];
     setPracticeSeconds(0);
     setSessionCost(0);
     return savedMinutes;
@@ -380,9 +390,53 @@ export function App() {
       return;
     }
     stopAudio();
+    const turns = sessionTurnsRef.current;
+    const corrections = sessionUpgradesRef.current;
+    const localMinutes = Math.round(practiceSecondsRef.current / 60);
     const minutes = await rotateSession();
     await loadProgress();
-    addSystemMessage(`✅ Session saved${minutes !== null ? ` (${minutes} min)` : ''}. A new session starts now.`);
+    setMessages(prev => [...prev, {
+      id: `recap-${Date.now()}`,
+      sender: 'recap',
+      text: '',
+      recap: { minutes: minutes ?? localMinutes, turns, corrections }
+    }]);
+  };
+
+  // Fijar el nivel a mano (sin test) y pasar directamente a practicar
+  const applyLevel = async (level: string, source: 'manual' | 'level-up') => {
+    if (source === 'manual' && !window.confirm(`¿Usar ${level} como tu nivel? Ethan adaptará las sesiones a ese nivel.`)) return;
+    setLevelBusy(true);
+    try {
+      const res = await fetch('/api/user/level', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level, source })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addSystemMessage(`⚠️ ${data.error || 'Could not update your level.'}`);
+        return;
+      }
+      stopAudio();
+      await rotateSession();
+      setDiagnostic(data.diagnostic);
+      setMode('daily_session');
+      const saved = await loadProgress();
+      if (source === 'level-up') {
+        addSystemMessage(`🎉 ¡Subiste a ${level}! Ethan te hablará con vocabulario y retos de ${level}. Tu barra de progreso empieza de nuevo hacia el siguiente nivel.`);
+      }
+      if (saved) {
+        const welcome = buildReturningWelcome(saved);
+        setMessages(prev => [...prev, welcome]);
+        setStarted(true);
+        if (welcome.spokenText) playAudio(welcome.spokenText);
+      }
+    } catch {
+      addSystemMessage('⚠️ Connection problem while updating your level.');
+    } finally {
+      setLevelBusy(false);
+    }
   };
 
   const restartPlacement = async (scope: 'level' | 'all') => {
@@ -444,8 +498,8 @@ export function App() {
           topic: mode === 'placement' ? 'Placement diagnostic' : diagnostic?.firstSessionRecommendedTheme || 'Free conversation',
           userContext: {
             cefrLevel: diagnostic?.assignedLevel,
-            // Paso que Ethan debe ejecutar ahora (el 1 ya lo hizo la bienvenida)
-            testStep: Math.min(testStep + 1, 4),
+            // Etapa del test que el alumno acaba de responder (la 1 la pregunta el saludo)
+            testStep: Math.min(testStep, 3),
             sessionDurationMinutes: Math.round(practiceSeconds / 60)
           }
         })
@@ -475,8 +529,15 @@ export function App() {
         sender: 'tutor',
         text: data.rawResponse,
         spokenText: data.spokenText,
+        spanish: data.spanishText || undefined,
         upgrades: data.upgrades
       };
+      if (data.upgrades?.length) {
+        sessionUpgradesRef.current = [...sessionUpgradesRef.current, ...data.upgrades];
+      }
+      if (data.levelProgress) {
+        setProgress(prev => (prev ? { ...prev, levelProgress: data.levelProgress } : prev));
+      }
 
       setMessages(prev => [...prev, tutorMsg]);
 
@@ -492,7 +553,12 @@ export function App() {
         await rotateSession();
         await loadProgress();
       } else if (mode === 'placement') {
-        setTestStep(prev => Math.min(prev + 1, 4));
+        // Ethan decide si la respuesta sirve para evaluar la etapa; si no, la repite y no se avanza
+        if (data.stepStatus === 'repeat') {
+          addSystemMessage('🔁 Ethan necesita un poco más para esta etapa: no cuenta todavía. Respóndele con calma (puedes usar el ejemplo que te da).');
+        } else {
+          setTestStep(prev => Math.min(prev + 1, 4));
+        }
       } else if (data.upgrades?.length) {
         loadProgress();
       }
@@ -523,7 +589,7 @@ export function App() {
     stopAudio();
     let result;
     try {
-      result = await recorder.record();
+      result = await recorder.record({ silenceMs: silenceMode === 'manual' ? null : Number(silenceMode) });
     } catch (err) {
       const name = (err as { name?: string })?.name;
       addSystemMessage(name === 'NotAllowedError'
@@ -640,7 +706,11 @@ export function App() {
                 : transcribing
                   ? 'Transcribing your voice...'
                   : recorder.isRecording
-                    ? 'Recording — just stop talking to send (or tap the mic)'
+                    ? silenceMode === 'manual'
+                      ? 'Recording — tap the mic when you finish · Toca el micro al terminar'
+                      : recorder.sendCountdownMs !== null
+                        ? `Sending in ${Math.ceil(recorder.sendCountdownMs / 1000)}s… keep talking to continue · Sigue hablando para continuar`
+                        : 'Recording — take your time · Tómate tu tiempo'
                     : isListening
                       ? 'Listening to your microphone...'
                       : 'Ready for conversation'}
@@ -680,6 +750,8 @@ export function App() {
             )}
             {messages.map(msg => msg.sender === 'system' ? (
               <div key={msg.id} className="system-notice">{msg.text}</div>
+            ) : msg.sender === 'recap' && msg.recap ? (
+              <SessionRecap key={msg.id} recap={msg.recap} showSpanish={showSpanish} />
             ) : (
               <div key={msg.id} className={`message-bubble ${msg.sender === 'user' ? 'user' : 'assistant'}`}>
                 <div className="bubble-header">
@@ -697,26 +769,15 @@ export function App() {
 
                 {/* Texto conversacional */}
                 <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {msg.spokenText || msg.text.replace(/\[SPOKEN RESPONSE\]/i, '').replace(/\[NATIVE UPGRADE\][\s\S]*$/i, '').trim()}
+                  {msg.spokenText || msg.text.replace(/\[SPOKEN RESPONSE\]/i, '').replace(/\[(SPANISH|NATIVE UPGRADE|STEP_STATUS|SCORES)\][\s\S]*$/i, '').trim()}
                 </div>
+
+                {/* Traducción para entender lo que dice Ethan */}
+                {showSpanish && msg.spanish && <div className="bubble-spanish">🇪🇸 {msg.spanish}</div>}
 
                 {/* Active Recasting: The Native Upgrade */}
                 {msg.upgrades?.map((upgrade, idx) => (
-                  <div className="upgrade-card" key={idx}>
-                    <div className="upgrade-row original">
-                      <span>❌</span>
-                      <span>{upgrade.original}</span>
-                    </div>
-                    <div className="upgrade-row native">
-                      <span>⚡</span>
-                      <span>{upgrade.native}</span>
-                    </div>
-                    {upgrade.tip && (
-                      <div className="upgrade-tip">
-                        💡 {upgrade.tip}
-                      </div>
-                    )}
-                  </div>
+                  <UpgradeCard key={idx} upgrade={upgrade} showSpanish={showSpanish} onListen={playAudio} />
                 ))}
               </div>
             ))}
@@ -759,52 +820,82 @@ export function App() {
               </button>
             </div>
           </div>
+          <div className="dock-settings">
+            <button
+              className={`toggle-chip ${showSpanish ? 'on' : ''}`}
+              onClick={() => {
+                setShowSpanish(v => !v);
+                writePref('showSpanish', String(!showSpanish));
+              }}
+              title="Mostrar traducción y explicaciones en español"
+            >
+              <Languages size={14} />
+              <span>Español {showSpanish ? 'ON' : 'OFF'}</span>
+            </button>
+            {sttAvailable && (
+              <label className="toggle-chip" title="Cuánto silencio esperar antes de enviar tu grabación">
+                <Timer size={14} />
+                <span>Enviar tras pausa de</span>
+                <select
+                  value={silenceMode}
+                  onChange={e => {
+                    setSilenceMode(e.target.value);
+                    writePref('silenceMode', e.target.value);
+                  }}
+                >
+                  {SILENCE_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
         </div>
 
         {/* Sidebar Analytics & Diagnostic Flow */}
         <aside className="side-panel">
-          {/* Placement Progress Card */}
-          <div className="panel-card">
-            <div className="panel-title">
-              <Sparkles size={18} color="var(--accent-primary)" />
-              <span>{diagnostic ? 'Your Diagnostic' : 'Initial Diagnostic Test'}</span>
-            </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-              Adaptive test to calibrate your natural rhythm, collocations, and eliminate Spanish interference.
-            </p>
+          {/* Test de nivel: en qué etapa vas, qué se evalúa y cómo responder */}
+          {mode === 'placement' && !diagnostic && (
+            <DiagnosticGuide stage={testStep} onRestart={() => restartPlacement('level')} />
+          )}
 
-            <div className="diagnostic-stepper">
-              {[1, 2, 3, 4].map(step => (
-                <div
-                  key={step}
-                  className={`step-indicator ${!diagnostic && step === testStep ? 'active' : step < testStep || diagnostic ? 'completed' : ''}`}
-                >
-                  <div className="step-circle">
-                    {step < testStep || diagnostic ? <CheckCircle2 size={16} /> : step}
-                  </div>
-                  <span>Step {step}</span>
-                </div>
-              ))}
-            </div>
+          {/* Tu nivel: elegirlo o hacer el test, y progreso hacia el siguiente */}
+          <LevelCard
+            level={progress?.cefrLevel ?? null}
+            diagnostic={diagnostic}
+            levelProgress={progress?.levelProgress ?? null}
+            inPlacement={mode === 'placement' && !diagnostic}
+            busy={levelBusy || loading}
+            onSetLevel={level => applyLevel(level, 'manual')}
+            onTakeTest={() => restartPlacement('level')}
+            onLevelUp={level => applyLevel(level, 'level-up')}
+          />
 
-            {diagnostic && (
-              <div className="diagnostic-report">
-                <span className="report-badge">CEFR Level: {diagnostic.assignedLevel}</span>
-                <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginTop: '4px' }}>
-                  Top Priority Focus Areas:
-                </p>
-                <ul className="priority-list">
-                  {diagnostic.priorityAreas.map((area, idx) => (
-                    <li key={idx}>{area}</li>
-                  ))}
-                </ul>
-                <button className="ghost-button" disabled={loading} onClick={() => restartPlacement('level')}>
-                  <RotateCcw size={14} />
-                  <span>Retake diagnostic</span>
-                </button>
+          {/* Qué trabajar según el diagnóstico */}
+          {diagnostic && (diagnostic.priorityAreas.length > 0 || diagnostic.strengths.length > 0) && (
+            <div className="panel-card">
+              <div className="panel-title">
+                <Target size={18} color="var(--color-correction)" />
+                <span>Focus · En qué trabajar</span>
               </div>
-            )}
-          </div>
+              {diagnostic.strengths.length > 0 && (
+                <>
+                  <p className="focus-label">✅ Lo que haces bien</p>
+                  <ul className="priority-list">
+                    {diagnostic.strengths.map((item, idx) => <li key={idx}>{item}</li>)}
+                  </ul>
+                </>
+              )}
+              {diagnostic.priorityAreas.length > 0 && (
+                <>
+                  <p className="focus-label">🎯 Prioridades</p>
+                  <ul className="priority-list">
+                    {diagnostic.priorityAreas.map((item, idx) => <li key={idx}>{item}</li>)}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Engine selector + cost comparison */}
           <div className="panel-card">

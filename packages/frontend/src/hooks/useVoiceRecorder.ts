@@ -1,12 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
 
 // Graba el micrófono con Web Audio y devuelve un WAV PCM 16 kHz mono (formato nativo de whisper.cpp).
-// Para solo tras ~1,5 s de silencio una vez que el usuario habló, o al pulsar de nuevo el botón.
+// Envía solo tras `silenceMs` de silencio una vez que el usuario habló (pausas para pensar más cortas no cortan),
+// o al pulsar de nuevo el botón. silenceMs = null → modo manual: solo el botón termina la grabación.
 
 const TARGET_RATE = 16000;
-const SILENCE_AFTER_SPEECH_MS = 1500;
-const NO_SPEECH_TIMEOUT_MS = 10000;
-const MAX_RECORDING_MS = 60000;
+const NO_SPEECH_TIMEOUT_MS = 20000;
+const MAX_RECORDING_MS = 120000;
+
+export interface RecordOptions {
+  silenceMs: number | null;
+}
 
 export type RecorderResult =
   | { kind: 'audio'; wav: Blob; durationMs: number }
@@ -55,6 +59,8 @@ function encodeWav(samples: Float32Array): Blob {
 
 export function useVoiceRecorder() {
   const [isRecording, setIsRecording] = useState(false);
+  // ms que faltan para enviar automáticamente (silencio tras hablar); null = hablando o sin cuenta atrás
+  const [sendCountdownMs, setSendCountdownMs] = useState<number | null>(null);
   const sessionRef = useRef<{
     stream: MediaStream;
     context: AudioContext;
@@ -72,6 +78,7 @@ export function useVoiceRecorder() {
     session.stream.getTracks().forEach(track => track.stop());
     session.context.close().catch(() => { /* ya cerrado */ });
     setIsRecording(false);
+    setSendCountdownMs(null);
   };
 
   const stop = useCallback(() => {
@@ -92,7 +99,7 @@ export function useVoiceRecorder() {
   }, []);
 
   // Resuelve cuando termina la grabación (silencio, botón o límite). Lanza si no hay permiso de micrófono
-  const record = useCallback(async (): Promise<RecorderResult> => {
+  const record = useCallback(async ({ silenceMs }: RecordOptions): Promise<RecorderResult> => {
     if (sessionRef.current) throw new Error('already-recording');
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -136,7 +143,14 @@ export function useVoiceRecorder() {
           lastVoiceAt = now;
         }
 
-        if (heardSpeech && now - lastVoiceAt > SILENCE_AFTER_SPEECH_MS) {
+        const silentFor = now - lastVoiceAt;
+        if (silenceMs !== null && heardSpeech) {
+          // La cuenta atrás solo se muestra en la segunda mitad del silencio: pausas cortas para pensar no alarman
+          const left = silenceMs - silentFor;
+          setSendCountdownMs(left < silenceMs / 2 ? Math.max(0, left) : null);
+        }
+
+        if (silenceMs !== null && heardSpeech && silentFor > silenceMs) {
           stop();
         } else if (!heardSpeech && now - startedAt > NO_SPEECH_TIMEOUT_MS) {
           cleanup();
@@ -158,5 +172,5 @@ export function useVoiceRecorder() {
     finish?.({ kind: 'no-speech' });
   }, []);
 
-  return { isRecording, record, stop, cancel };
+  return { isRecording, sendCountdownMs, record, stop, cancel };
 }

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { DiagnosticData, NativeUpgrade } from '../agents/responseParser.js';
+import type { DiagnosticData, NativeUpgrade, SkillScores } from '../agents/responseParser.js';
 import { JsonFile } from './jsonFile.js';
 
 // Persistencia ligera mono-usuario en JSON con escritura atómica (tmp + rename)
@@ -10,6 +10,8 @@ export type SessionMode = 'placement' | 'daily_session';
 export type ResetScope = 'level' | 'all';
 
 export interface DiagnosticRecord {
+  // test = diagnóstico con Ethan; manual = el alumno fijó su nivel; level-up = subió tras demostrar progreso
+  source?: 'test' | 'manual' | 'level-up';
   assignedLevel: CefrLevel;
   strengths: string[];
   priorityAreas: string[];
@@ -34,14 +36,39 @@ export interface NativeUpgradeRecord extends NativeUpgrade {
   lastSeenAt: string;
 }
 
+export interface SkillScoreRecord extends SkillScores {
+  at: string;
+  level: CefrLevel;
+  corrections: number;
+}
+
+export interface LevelProgress {
+  level: CefrLevel;
+  nextLevel: CefrLevel | null;
+  percent: number;
+  evaluatedAnswers: number;
+  requiredAnswers: number;
+  targetAverage: number;
+  averages: SkillScores | null;
+  overallAverage: number | null;
+  correctionsPerAnswer: number | null;
+  readyToLevelUp: boolean;
+}
+
 export interface UserProgress {
   version: 1;
   cefrLevel: CefrLevel | null;
   diagnostic: DiagnosticRecord | null;
   sessions: SessionRecord[];
   nativeUpgrades: NativeUpgradeRecord[];
+  skillHistory: SkillScoreRecord[];
   updatedAt: string;
 }
+
+// Regla para subir de nivel: media ≥ 4,3/5 en las últimas 30 respuestas evaluadas en el nivel actual
+const LEVEL_UP_WINDOW = 30;
+const LEVEL_UP_TARGET = 4.3;
+const MAX_SKILL_HISTORY = 1000;
 
 const MAX_SESSIONS = 500;
 const MAX_UPGRADES = 300;
@@ -55,6 +82,7 @@ function emptyProgress(): UserProgress {
     diagnostic: null,
     sessions: [],
     nativeUpgrades: [],
+    skillHistory: [],
     updatedAt: new Date().toISOString()
   };
 }
@@ -96,7 +124,8 @@ export class ProgressStore {
       ...parsed,
       cefrLevel: normalizeCefrLevel(parsed.cefrLevel),
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      nativeUpgrades: Array.isArray(parsed.nativeUpgrades) ? parsed.nativeUpgrades : []
+      nativeUpgrades: Array.isArray(parsed.nativeUpgrades) ? parsed.nativeUpgrades : [],
+      skillHistory: Array.isArray(parsed.skillHistory) ? parsed.skillHistory : []
     };
   }
 
@@ -124,6 +153,7 @@ export class ProgressStore {
     }
     this.data.cefrLevel = level;
     this.data.diagnostic = {
+      source: 'test',
       assignedLevel: level,
       strengths: diagnostic.strengths.slice(0, 10),
       priorityAreas: diagnostic.priorityAreas.slice(0, 10),
@@ -132,6 +162,62 @@ export class ProgressStore {
     };
     await this.persist();
     return level;
+  }
+
+  // Nivel fijado por el alumno (o subida de nivel). Conserva fortalezas/prioridades del diagnóstico si existía
+  async setLevel(value: unknown, source: 'manual' | 'level-up'): Promise<CefrLevel | null> {
+    const level = normalizeCefrLevel(value);
+    if (!level) return null;
+    const previous = this.data.diagnostic;
+    this.data.cefrLevel = level;
+    this.data.diagnostic = {
+      source,
+      assignedLevel: level,
+      strengths: previous?.strengths ?? [],
+      priorityAreas: previous?.priorityAreas ?? [],
+      firstSessionRecommendedTheme: previous?.firstSessionRecommendedTheme ?? '',
+      assessedAt: new Date().toISOString()
+    };
+    await this.persist();
+    return level;
+  }
+
+  async recordScores(scores: SkillScores, corrections: number): Promise<void> {
+    if (!this.data.cefrLevel) return;
+    this.data.skillHistory.push({ ...scores, corrections, level: this.data.cefrLevel, at: new Date().toISOString() });
+    if (this.data.skillHistory.length > MAX_SKILL_HISTORY) {
+      this.data.skillHistory = this.data.skillHistory.slice(-MAX_SKILL_HISTORY);
+    }
+    await this.persist();
+  }
+
+  // Progreso hacia el siguiente nivel con las últimas respuestas evaluadas EN el nivel actual.
+  // percent combina rendimiento (media 2 → 0 %, media 4,3 → 100 %) y cantidad de práctica (30 respuestas)
+  getLevelProgress(): LevelProgress | null {
+    const level = this.data.cefrLevel;
+    if (!level) return null;
+    const index = CEFR_LEVELS.indexOf(level);
+    const nextLevel = index < CEFR_LEVELS.length - 1 ? CEFR_LEVELS[index + 1] : null;
+    const recent = this.data.skillHistory.filter(r => r.level === level).slice(-LEVEL_UP_WINDOW);
+    const n = recent.length;
+    const avg = (key: keyof SkillScores) => recent.reduce((sum, r) => sum + r[key], 0) / Math.max(1, n);
+    const averages = n ? { fluency: avg('fluency'), vocabulary: avg('vocabulary'), grammar: avg('grammar') } : null;
+    const overall = averages ? (averages.fluency + averages.vocabulary + averages.grammar) / 3 : null;
+    const performance = overall === null ? 0 : Math.min(1, Math.max(0, (overall - 2) / (LEVEL_UP_TARGET - 2)));
+    const practice = Math.min(1, n / LEVEL_UP_WINDOW);
+    const round1 = (v: number) => Math.round(v * 10) / 10;
+    return {
+      level,
+      nextLevel,
+      percent: nextLevel ? Math.round(performance * practice * 100) : 100,
+      evaluatedAnswers: n,
+      requiredAnswers: LEVEL_UP_WINDOW,
+      targetAverage: LEVEL_UP_TARGET,
+      averages: averages && { fluency: round1(averages.fluency), vocabulary: round1(averages.vocabulary), grammar: round1(averages.grammar) },
+      overallAverage: overall === null ? null : round1(overall),
+      correctionsPerAnswer: n ? round1(recent.reduce((sum, r) => sum + r.corrections, 0) / n) : null,
+      readyToLevelUp: !!nextLevel && n >= LEVEL_UP_WINDOW && (overall ?? 0) >= LEVEL_UP_TARGET
+    };
   }
 
   async addUpgrades(upgrades: NativeUpgrade[]): Promise<void> {
@@ -146,6 +232,8 @@ export class ProgressStore {
         existing.lastSeenAt = now;
         existing.native = upgrade.native;
         existing.tip = upgrade.tip || existing.tip;
+        existing.pronunciation = upgrade.pronunciation || existing.pronunciation;
+        existing.explanationEs = upgrade.explanationEs || existing.explanationEs;
       } else {
         this.data.nativeUpgrades.push({ ...upgrade, count: 1, firstSeenAt: now, lastSeenAt: now });
       }

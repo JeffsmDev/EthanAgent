@@ -37,8 +37,8 @@ app.use(express.json({ limit: '256kb' }));
 const engines = new EngineRegistry(engineConfigFromEnv(), dataDir);
 const ttsService = new EdgeTtsService(process.env.TTS_VOICE || 'en-US-ChristopherNeural');
 const sttService = new WhisperSttService(process.env.WHISPER_BIN, process.env.WHISPER_MODEL_PATH, Number(process.env.WHISPER_THREADS));
-// 60 s de WAV 16 kHz mono 16 bits ≈ 1,9 MB
-const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+// WAV 16 kHz mono 16 bits ≈ 1,9 MB por minuto; el grabador corta a los 2 min (≈ 3,8 MB)
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 // Express 4 no captura promesas rechazadas: sin esto una excepción async deja la petición colgada
 const asyncRoute = (handler: (req: Request, res: Response) => Promise<unknown>): RequestHandler =>
@@ -162,7 +162,7 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
 
     engines.noteTurn(engine.provider);
 
-    const { spokenText, upgrades, diagnosticData } = parseTutorResponse(rawResponse);
+    const { spokenText, spanishText, upgrades, diagnosticData, stepStatus, scores } = parseTutorResponse(rawResponse);
 
     // Persistencia best-effort: un fallo de disco no debe romper la conversación
     let savedLevel = null;
@@ -174,6 +174,9 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
       if (isValidSessionId(sessionId)) {
         await progressStore.recordTurn(sessionId, safeMode, String(topic));
       }
+      if (safeMode === 'daily_session' && scores) {
+        await progressStore.recordScores(scores, upgrades.length);
+      }
     } catch (persistError) {
       console.error('Error persistiendo progreso:', persistError);
     }
@@ -181,7 +184,12 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     res.json({
       rawResponse,
       spokenText,
+      spanishText,
       upgrades,
+      // Solo en diagnóstico: advance = la respuesta cuenta y se pasa a la siguiente etapa; repeat = se repite
+      stepStatus: safeMode === 'placement' ? (stepStatus ?? 'advance') : null,
+      scores,
+      levelProgress: progressStore.getLevelProgress(),
       // Si el nivel no se pudo guardar (CEFR inválido), el test NO se da por terminado: el usuario sigue en diagnóstico
       diagnosticData: diagnosticData?.testCompleted
         ? (savedLevel ? { ...diagnosticData, assignedLevel: savedLevel } : { ...diagnosticData, testCompleted: false })
@@ -229,10 +237,25 @@ app.get('/api/user/progress', (req: Request, res: Response) => {
     },
     sessions: sessions.slice(0, 50),
     weakPoints: progressStore.getWeakPoints(10),
+    levelProgress: progressStore.getLevelProgress(),
     nativeUpgrades: progress.nativeUpgrades,
     updatedAt: progress.updatedAt
   });
 });
+
+// Fijar el nivel a mano (sin test) o subir de nivel cuando el progreso lo permite
+app.post('/api/user/level', asyncRoute(async (req: Request, res: Response) => {
+  const current = progressStore.getLevelProgress();
+  const levelUp = req.body?.source === 'level-up';
+  if (levelUp && !(current?.readyToLevelUp && current.nextLevel === req.body?.level)) {
+    return res.status(400).json({ error: 'Not ready to level up yet.', code: 'NOT_READY' });
+  }
+  const level = await progressStore.setLevel(req.body?.level, levelUp ? 'level-up' : 'manual');
+  if (!level) {
+    return res.status(400).json({ error: 'Level must be one of A1, A2, B1, B2, C1.', code: 'BAD_LEVEL' });
+  }
+  res.json({ cefrLevel: level, diagnostic: progressStore.getProgress().diagnostic, levelProgress: progressStore.getLevelProgress() });
+}));
 
 // scope 'level' = repetir solo el diagnóstico; 'all' (default) = borrar todo el progreso
 app.post('/api/user/reset', asyncRoute(async (req: Request, res: Response) => {
@@ -270,9 +293,11 @@ app.get('/api/voice/synthesize', asyncRoute(async (req: Request, res: Response) 
     return res.status(400).json({ error: `Texto demasiado largo (máx ${MAX_TTS_CHARS} caracteres)` });
   }
 
+  // rate=slow → versión lenta para practicar la pronunciación de una corrección
+  const rate = req.query.rate === 'slow' ? '-30%' : undefined;
   let stream;
   try {
-    stream = await ttsService.synthesizeToStream(text);
+    stream = await ttsService.synthesizeToStream(text, rate);
   } catch (error) {
     console.error('Error conectando con Edge TTS:', error);
     // 502: el servicio de voz externo falló; el frontend cae a la voz del navegador

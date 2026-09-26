@@ -24,8 +24,8 @@ server {
     listen [::]:80;
     server_name __DOMAIN__;
 
-    # Mensajes de chat + historial; el backend limita a 256 KB
-    client_max_body_size 1m;
+    # Grabaciones de voz (WAV, hasta 2 min ≈ 4 MB; el backend limita a 8 MB) + mensajes de chat
+    client_max_body_size 10m;
 
     # Cabeceras de seguridad (microphone=(self) es necesario para hablar con Ethan)
     add_header X-Content-Type-Options "nosniff" always;

@@ -38,6 +38,8 @@ diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con 
 
 | G — Voz robusta + Ethan habla primero | ✅ | Brave bloquea la Web Speech API (error `network`, antes silenciado). Nuevo: grabación Web Audio → WAV 16 kHz → `POST /api/voice/transcribe` → whisper.cpp v1.9.4 `base.en` compilado en la imagen (AVX2). Conserva los errores del alumno (verificado). Auto-stop por silencio. Pantalla "Start session": el clic desbloquea el audio y Ethan saluda en voz alta. Errores de micrófono visibles. E2E con micrófono simulado en Edge OK |
 
+| H — Aprendizaje guiado para hispanohablantes | ✅ | Formato de Ethan: `[SPOKEN RESPONSE]` + `[SPANISH]` (traducción) + `[NATIVE UPGRADE]` con 🗣️ pronunciación y 🇪🇸 explicación + `[STEP_STATUS]` (test: `repeat` si la respuesta no basta → la etapa no avanza) + `[SCORES]` (práctica: fluidez/vocabulario/gramática 1-5 vs nivel actual). Nivel manual (`POST /api/user/level`) y barra de progreso al siguiente nivel (media ≥ 4,3 en 30 respuestas → botón de subir). Grabación: pausa configurable 2/4/6 s o manual con cuenta atrás, hasta 2 min (Nginx `client_max_body_size 10m`). Resumen al cerrar sesión. Botones 🔊/🐌 para escuchar la frase correcta. Coste Sonnet sube a ~$0,012-0,018/turno por el español |
+
 ## Pendiente / siguientes pasos
 
 - Generar `CLAUDE_CODE_OAUTH_TOKEN` en la VPS (`ssh -t vps-agent "~/.local/bin/claude setup-token"`) y guardarlo con `sudo bash /opt/ethan/deploy/set-claude-token.sh`. La sesión interactiva de Claude de `claudeagent` está caducada (re-login con `claude` → `/login` si se quiere usar allí).
