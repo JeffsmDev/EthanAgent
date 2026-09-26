@@ -9,7 +9,7 @@ import { parseTutorResponse } from './agents/responseParser.js';
 import { ProgressStore, isValidSessionId, ResetScope } from './store/progressStore.js';
 import { UsageStore } from './store/usageStore.js';
 import { ChatMessage } from './engines/aiProvider.js';
-import { EngineRegistry, engineConfigFromEnv, liveStatus } from './engines/engineFactory.js';
+import { EngineRegistry, engineConfigFromEnv } from './engines/engineFactory.js';
 import { EngineError, withResilience } from './engines/engineErrors.js';
 import { EdgeTtsService } from './voice/edgeTtsService.js';
 
@@ -54,7 +54,7 @@ function sanitizeHistory(history: unknown): ChatMessage[] {
 
 // Health Check
 app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
-  const engine = await liveStatus(engines.current);
+  const engine = await engines.currentStatus();
   res.json({
     status: 'online',
     tutor: 'Ethan (Native English Coach)',
@@ -65,14 +65,14 @@ app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
 }));
 
 // Motores elegibles. Solo se puede elegir entre los que el servidor ya tiene configurados: nunca se aceptan keys
-app.get('/api/engines', (req: Request, res: Response) => {
-  res.json({ current: engines.current.status, options: engines.options() });
-});
+app.get('/api/engines', asyncRoute(async (req: Request, res: Response) => {
+  res.json({ current: await engines.currentStatus(), options: engines.options() });
+}));
 
 app.post('/api/engine', asyncRoute(async (req: Request, res: Response) => {
   try {
     const selected = await engines.select(String(req.body?.provider || ''));
-    res.json({ current: await liveStatus(selected), options: engines.options() });
+    res.json({ current: await engines.currentStatus(), options: engines.options() });
   } catch (error) {
     if (error instanceof EngineError) {
       return res.status(400).json({ error: error.friendlyMessage, code: error.code });
@@ -154,6 +154,8 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     usageStore.record({ provider: engine.provider, model: result.model, sessionId: usageSessionId, latencyMs, usage: result.usage })
       .catch(err => console.error('Error registrando consumo:', err));
 
+    engines.noteTurn(engine.provider);
+
     const { spokenText, upgrades, diagnosticData } = parseTutorResponse(rawResponse);
 
     // Persistencia best-effort: un fallo de disco no debe romper la conversación
@@ -195,6 +197,7 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     }
     if (error instanceof EngineError) {
       console.error(`Error del motor en /api/chat: ${error.message}`);
+      engines.noteTurn(engine.provider, error);
       // Los fallos también cuentan al comparar motores (fiabilidad)
       usageStore.record({ provider: engine.provider, model: engine.model, sessionId: usageSessionId, latencyMs: Date.now() - startedAt, errorCode: error.code })
         .catch(err => console.error('Error registrando consumo:', err));

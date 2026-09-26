@@ -440,6 +440,10 @@ export function App() {
       if (requestSessionId !== sessionIdRef.current) return;
       if (!res.ok) {
         addSystemMessage(`⚠️ ${data.error || 'Ethan could not answer right now. Please try again.'}`);
+        // Credencial caducada o cuota agotada: el banner lo deja visible (no solo en el chat)
+        if (['AUTH', 'QUOTA', 'NOT_CONFIGURED', 'MODEL_NOT_FOUND'].includes(data.code)) {
+          setEngineWarning(data.error);
+        }
         // El mensaje vuelve al input para reintentar sin reescribirlo
         setInputText(content);
         return;

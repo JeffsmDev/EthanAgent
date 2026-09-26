@@ -159,6 +159,9 @@ export class EngineRegistry {
   private readonly config: EngineConfig;
   private readonly settings: JsonFile<{ provider: ProviderName }>;
   current: ResolvedEngine;
+  // Último fallo "de configuración" del motor activo (credencial caducada, cuota agotada…): se muestra en la UI
+  // hasta que un turno vuelva a funcionar. Es la única señal fiable de que una sesión OAuth expiró
+  private blockingFailure: { provider: ProviderName; message: string } | null = null;
 
   constructor(config: EngineConfig, dataDir: string) {
     this.config = config;
@@ -192,6 +195,24 @@ export class EngineRegistry {
     ];
   }
 
+  noteTurn(provider: ProviderName, error?: EngineError): void {
+    if (!error) {
+      if (this.blockingFailure?.provider === provider) this.blockingFailure = null;
+      return;
+    }
+    if (['AUTH', 'QUOTA', 'NOT_CONFIGURED', 'MODEL_NOT_FOUND'].includes(error.code)) {
+      this.blockingFailure = { provider, message: error.friendlyMessage };
+    }
+  }
+
+  async currentStatus(): Promise<EngineStatus> {
+    const status = await liveStatus(this.current);
+    const failure = this.blockingFailure;
+    return failure && failure.provider === status.activeProvider
+      ? { ...status, ready: false, warning: failure.message }
+      : status;
+  }
+
   async select(provider: string): Promise<ResolvedEngine> {
     const option = this.options().find(o => o.provider === provider);
     if (!option) {
@@ -203,6 +224,7 @@ export class EngineRegistry {
     const next = resolveEngine({ ...this.config, provider });
     await this.settings.write({ provider: option.provider });
     this.current = next;
+    this.blockingFailure = null;
     resetLiveStatusCache();
     console.log(`🔀 Motor cambiado a ${this.current.status.engineName}`);
     return this.current;
