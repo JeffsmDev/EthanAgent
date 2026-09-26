@@ -15,12 +15,16 @@ El estado vivo del proyecto y la bitácora de fases están en [CONTEXT.md](CONTE
 ```
 packages/backend    Node 22 + TS + Express (ESM, NodeNext → imports con extensión .js)
   src/server.ts            rutas HTTP; en producción también sirve el frontend compilado
-  src/engines/             motores IA: gemini | ollama | mock (interfaz AIEngine en aiProvider.ts)
-    engineFactory.ts       elige motor desde .env; sin key/config inválida → mock + warning para la UI
+  src/engines/             motores IA: claude | gemini | ollama | mock (interfaz AIEngine en aiProvider.ts)
+    claudeCliEngine.ts     Claude vía `claude -p` (suscripción, CLAUDE_CODE_OAUTH_TOKEN), sin tools/MCP/settings
+    engineFactory.ts       EngineRegistry: motores disponibles + cambio en caliente persistido (data/engine.json)
+    pricing.ts             tarifas Gemini para estimar coste (Claude reporta el suyo)
     engineErrors.ts        EngineError tipado + withResilience (timeout, backoff, cancelación)
   src/agents/tutorPrompt.ts    system prompt pedagógico (Lexical Approach + Active Recasting + STUDENT MEMORY)
   src/agents/responseParser.ts parseo único de [SPOKEN RESPONSE] / [NATIVE UPGRADE] / ```json
   src/store/progressStore.ts   persistencia JSON (nivel CEFR, sesiones, Native Upgrades)
+  src/store/usageStore.ts      historial de coste/latencia por turno y motor (data/usage.json)
+  src/store/jsonFile.ts        helper de JSON con escritura atómica compartido por los stores
   src/voice/edgeTtsService.ts  TTS neuronal (msedge-tts). El texto SIEMPRE se escapa (SSML)
   data/progress.json       datos del usuario (gitignored, volumen en Docker)
 packages/frontend   React 18 + Vite + CSS vanilla (proxy /api → :4000 en dev)
@@ -42,6 +46,7 @@ pnpm start                   # producción: backend sirve API + frontend en :400
 - Formato de respuesta del tutor: `[SPOKEN RESPONSE]` (va a TTS) + `[NATIVE UPGRADE]` opcional + bloque ```json al cerrar el diagnóstico. El parseo vive en el backend (`src/agents/responseParser.ts`); no duplicarlo en el frontend.
 - Errores del motor IA → HTTP 503 con `{ code, friendlyMessage }`; el frontend los muestra, nunca crashea.
 - El backend debe correr como **una sola instancia** (el store JSON no es multi-proceso).
-- `/api/config/engine` solo existe con `ENABLE_ENGINE_SWITCH=true` (desarrollo). Nunca en producción.
+- El cambio de motor (`POST /api/engine`) solo elige entre motores ya configurados en el servidor: **nunca** aceptar keys/tokens desde el cliente.
+- Todo motor nuevo devuelve `EngineResult` con `usage` (tokens + coste) para que el historial de costes siga siendo comparable.
 - Comentarios y logs en español, contenido pedagógico/UI del tutor en inglés.
 - Tras cambiar código: `pnpm build` debe pasar limpio antes de dar una tarea por terminada.

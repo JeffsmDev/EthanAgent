@@ -1,15 +1,19 @@
-import { AIEngine } from './aiProvider.js';
+import path from 'node:path';
+import { AIEngine, ProviderName } from './aiProvider.js';
+import { ClaudeCliEngine, detectClaudeCli } from './claudeCliEngine.js';
 import { GeminiEngine } from './geminiEngine.js';
 import { LocalOllamaEngine } from './localOllamaEngine.js';
 import { MockEngine } from './mockEngine.js';
 import { EngineError, ResilienceOptions } from './engineErrors.js';
+import { JsonFile } from '../store/jsonFile.js';
 
-export type ProviderName = 'gemini' | 'ollama' | 'mock';
+export type { ProviderName } from './aiProvider.js';
 
 export interface EngineStatus {
   requestedProvider: string;
   activeProvider: ProviderName;
   engineName: string;
+  model: string;
   ready: boolean;
   // Aviso amigable para mostrar en la UI (API key ausente, Ollama caído, provider inválido…)
   warning: string | null;
@@ -23,13 +27,29 @@ export interface ResolvedEngine {
 
 export interface EngineConfig {
   provider?: string;
+  claudeBin?: string;
+  claudeModel?: string;
   geminiApiKey?: string;
   geminiModel?: string;
   ollamaBaseUrl?: string;
   ollamaModel?: string;
+  ollamaEnabled?: boolean;
   timeoutMs?: number;
   maxRetries?: number;
 }
+
+// Opción que el usuario puede elegir en la UI (solo motores configurados en el servidor: nunca se envían keys)
+export interface EngineOption {
+  provider: ProviderName;
+  label: string;
+  model: string;
+  available: boolean;
+  reason: string | null;
+}
+
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+const DEFAULT_OLLAMA_MODEL = 'llama3.1:latest';
 
 // Valores de ejemplo que la gente deja en el .env sin cambiar
 const PLACEHOLDER_KEYS = /^(|tu_api_key_aqui|your[_-]?api[_-]?key.*|changeme|xxx+|<.*>)$/i;
@@ -45,61 +65,148 @@ function positiveInt(value: number | undefined, fallback: number): number {
 export function engineConfigFromEnv(env: NodeJS.ProcessEnv = process.env): EngineConfig {
   return {
     provider: env.AI_PROVIDER,
+    claudeBin: env.CLAUDE_BIN,
+    claudeModel: env.CLAUDE_MODEL,
     geminiApiKey: env.GEMINI_API_KEY,
     geminiModel: env.GEMINI_MODEL,
     ollamaBaseUrl: env.OLLAMA_BASE_URL,
     ollamaModel: env.OLLAMA_MODEL,
+    ollamaEnabled: env.OLLAMA_ENABLED === 'true',
     timeoutMs: env.AI_TIMEOUT_MS ? Number(env.AI_TIMEOUT_MS) : undefined,
     maxRetries: env.AI_MAX_RETRIES ? Number(env.AI_MAX_RETRIES) : undefined
   };
 }
 
-function mockFallback(requested: string, warning: string | null, resilience: ResilienceOptions): ResolvedEngine {
-  const engine = new MockEngine();
+// La detección del CLI lanza un proceso: se hace una vez por binario
+const claudeCliCache = new Map<string, string | null>();
+function claudeCliVersion(bin: string): string | null {
+  if (!claudeCliCache.has(bin)) {
+    const version = detectClaudeCli(bin);
+    claudeCliCache.set(bin, version);
+    console.log(version ? `🤖 Claude Code CLI detectado: ${version}` : `⚠️ Claude Code CLI no encontrado (${bin})`);
+  }
+  return claudeCliCache.get(bin) ?? null;
+}
+
+function status(requested: string, engine: AIEngine, warning: string | null = null): EngineStatus {
   return {
-    engine,
-    resilience,
-    status: { requestedProvider: requested, activeProvider: 'mock', engineName: engine.name, ready: true, warning }
+    requestedProvider: requested,
+    activeProvider: engine.provider,
+    engineName: engine.name,
+    model: engine.model,
+    ready: true,
+    warning
   };
+}
+
+function mockFallback(requested: string, warning: string | null): ResolvedEngine {
+  const engine = new MockEngine();
+  return { engine, resilience: { timeoutMs: 5000, maxRetries: 0 }, status: status(requested, engine, warning) };
 }
 
 export function resolveEngine(config: EngineConfig): ResolvedEngine {
   const requested = (config.provider || 'mock').trim().toLowerCase();
   const maxRetries = positiveInt(config.maxRetries, 2);
 
+  if (requested === 'claude') {
+    const bin = config.claudeBin?.trim() || 'claude';
+    if (!claudeCliVersion(bin)) {
+      return mockFallback(requested,
+        'Demo mode: Claude Code CLI was not found on the server. Install it (or set CLAUDE_BIN) and restart, or pick another engine.');
+    }
+    const engine = new ClaudeCliEngine(bin, config.claudeModel?.trim() || DEFAULT_CLAUDE_MODEL);
+    // Cada turno arranca un proceso (~2 s) + el modelo; un reintento como máximo porque cada uno consume cuota
+    return {
+      engine,
+      resilience: { timeoutMs: positiveInt(config.timeoutMs, 90000), maxRetries: Math.min(maxRetries, 1) },
+      status: status(requested, engine)
+    };
+  }
+
   if (requested === 'gemini') {
-    const resilience = { timeoutMs: positiveInt(config.timeoutMs, 30000), maxRetries };
     if (!isUsableApiKey(config.geminiApiKey)) {
       console.warn('⚠️ AI_PROVIDER=gemini pero GEMINI_API_KEY no está configurada → arrancando en modo demo (mock)');
       return mockFallback(requested,
-        'Demo mode: no Gemini API key configured. Ethan is using scripted answers. Add GEMINI_API_KEY to packages/backend/.env and restart the server to unlock the real tutor.',
-        resilience);
+        'Demo mode: no Gemini API key configured. Ethan is using scripted answers. Add GEMINI_API_KEY to packages/backend/.env and restart the server to unlock the real tutor.');
     }
-    const engine = new GeminiEngine(config.geminiApiKey.trim(), config.geminiModel?.trim() || 'gemini-2.0-flash');
+    const engine = new GeminiEngine(config.geminiApiKey.trim(), config.geminiModel?.trim() || DEFAULT_GEMINI_MODEL);
     return {
       engine,
-      resilience,
-      status: { requestedProvider: requested, activeProvider: 'gemini', engineName: engine.name, ready: true, warning: null }
+      resilience: { timeoutMs: positiveInt(config.timeoutMs, 30000), maxRetries },
+      status: status(requested, engine)
     };
   }
 
   if (requested === 'ollama' || requested === 'local') {
     // Los modelos locales en CPU pueden tardar bastante más que una API
-    const resilience = { timeoutMs: positiveInt(config.timeoutMs, 120000), maxRetries: Math.min(maxRetries, 1) };
-    const engine = new LocalOllamaEngine(config.ollamaBaseUrl?.trim() || 'http://localhost:11434', config.ollamaModel?.trim() || 'llama3.1:latest');
+    const engine = new LocalOllamaEngine(config.ollamaBaseUrl?.trim() || 'http://localhost:11434', config.ollamaModel?.trim() || DEFAULT_OLLAMA_MODEL);
     return {
       engine,
-      resilience,
-      status: { requestedProvider: requested, activeProvider: 'ollama', engineName: engine.name, ready: true, warning: null }
+      resilience: { timeoutMs: positiveInt(config.timeoutMs, 120000), maxRetries: Math.min(maxRetries, 1) },
+      status: status(requested, engine)
     };
   }
 
-  const resilience = { timeoutMs: 5000, maxRetries: 0 };
   if (requested !== 'mock') {
-    console.warn(`⚠️ AI_PROVIDER="${requested}" no es válido (gemini | ollama | mock) → usando mock`);
-    return mockFallback(requested, `Demo mode: AI_PROVIDER="${requested}" is not valid. Use gemini, ollama or mock in packages/backend/.env.`, resilience);
+    console.warn(`⚠️ AI_PROVIDER="${requested}" no es válido (claude | gemini | ollama | mock) → usando mock`);
+    return mockFallback(requested, `Demo mode: AI_PROVIDER="${requested}" is not valid. Use claude, gemini, ollama or mock in packages/backend/.env.`);
   }
-  return mockFallback(requested, 'Demo mode: AI_PROVIDER=mock. Ethan is using scripted answers for testing.', resilience);
+  return mockFallback(requested, 'Demo mode: AI_PROVIDER=mock. Ethan is using scripted answers for testing.');
+}
+
+// Motores elegibles en caliente desde la UI. La elección se guarda en data/engine.json y sobrevive a reinicios
+export class EngineRegistry {
+  private readonly config: EngineConfig;
+  private readonly settings: JsonFile<{ provider: ProviderName }>;
+  current: ResolvedEngine;
+
+  constructor(config: EngineConfig, dataDir: string) {
+    this.config = config;
+    this.settings = new JsonFile(path.join(dataDir, 'engine.json'));
+    const saved = (this.settings.read() as { provider?: string } | null)?.provider;
+    // Si el motor guardado dejó de estar disponible (p. ej. se quitó la key), manda el .env
+    const savedOption = this.options().find(o => o.provider === saved && o.available);
+    this.current = resolveEngine({ ...config, provider: savedOption ? saved : config.provider });
+  }
+
+  options(): EngineOption[] {
+    const c = this.config;
+    const claudeBin = c.claudeBin?.trim() || 'claude';
+    const claudeOk = !!claudeCliVersion(claudeBin);
+    const geminiOk = isUsableApiKey(c.geminiApiKey);
+    const ollamaOk = !!c.ollamaEnabled || ['ollama', 'local'].includes((c.provider || '').toLowerCase());
+    return [
+      {
+        provider: 'claude', label: 'Claude (your subscription)', model: c.claudeModel?.trim() || DEFAULT_CLAUDE_MODEL,
+        available: claudeOk, reason: claudeOk ? null : 'Claude Code CLI not installed on the server'
+      },
+      {
+        provider: 'gemini', label: 'Gemini (API)', model: c.geminiModel?.trim() || DEFAULT_GEMINI_MODEL,
+        available: geminiOk, reason: geminiOk ? null : 'GEMINI_API_KEY not set'
+      },
+      {
+        provider: 'ollama', label: 'Ollama (local)', model: c.ollamaModel?.trim() || DEFAULT_OLLAMA_MODEL,
+        available: ollamaOk, reason: ollamaOk ? null : 'Set OLLAMA_ENABLED=true'
+      },
+      { provider: 'mock', label: 'Demo (scripted)', model: 'scripted', available: true, reason: null }
+    ];
+  }
+
+  async select(provider: string): Promise<ResolvedEngine> {
+    const option = this.options().find(o => o.provider === provider);
+    if (!option) {
+      throw new EngineError('BAD_REQUEST', `Motor desconocido: ${provider}`, `Unknown engine "${provider}".`);
+    }
+    if (!option.available) {
+      throw new EngineError('NOT_CONFIGURED', `Motor no disponible: ${provider}`, `${option.label} is not available: ${option.reason}.`);
+    }
+    const next = resolveEngine({ ...this.config, provider });
+    await this.settings.write({ provider: option.provider });
+    this.current = next;
+    resetLiveStatusCache();
+    console.log(`🔀 Motor cambiado a ${this.current.status.engineName}`);
+    return this.current;
+  }
 }
 
 // Estado en vivo: Ollama → ¿responde el servidor local? (cache 15 s). Gemini → ¿key y modelo válidos? (cache 5 min)
@@ -126,7 +233,7 @@ export async function liveStatus(resolved: ResolvedEngine): Promise<EngineStatus
   }
   return ollamaProbe.reachable
     ? resolved.status
-    : { ...resolved.status, ready: false, warning: `Ollama is not responding at ${resolved.engine.baseUrl}. Start it with "ollama serve" (and pull the model) or switch AI_PROVIDER in the backend .env.` };
+    : { ...resolved.status, ready: false, warning: `Ollama is not responding at ${resolved.engine.baseUrl}. Start it with "ollama serve" (and pull the model) or pick another engine.` };
 }
 
 export function resetLiveStatusCache(): void {

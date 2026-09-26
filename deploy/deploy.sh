@@ -9,7 +9,10 @@
 #   --domain <dominio>     Dominio apuntando (registro A) a la IP de la VPS. Necesario para Nginx + SSL
 #   --email <email>        Email para Let's Encrypt (si falta, no se emite SSL)
 #   --mode docker|pm2      docker (default, recomendado) o pm2 (Node 22 + pnpm directamente en el host)
-#   --gemini-key <key>     Configura AI_PROVIDER=gemini con esta key en packages/backend/.env
+#   --provider <motor>     Motor por defecto: claude | gemini | ollama | mock (se puede cambiar luego desde la UI)
+#   --claude-model <id>    Modelo del motor claude (default claude-sonnet-5)
+#   --gemini-key <key>     Guarda GEMINI_API_KEY en packages/backend/.env (y usa gemini si no se indica --provider)
+#   --allow-ip <ip|cidr>   Solo estas IPs acceden a la app (repetible). Sin él, la app queda abierta a todo Internet
 #   --app-port <puerto>    Puerto interno en 127.0.0.1 al que Nginx hace proxy (default 3000)
 #   --skip-nginx           No toca Nginx/SSL; publica la app en 0.0.0.0:<app-port> (sin HTTPS no funciona el micrófono)
 #   --no-pull              No hace git pull antes de desplegar
@@ -22,6 +25,9 @@ DOMAIN=""
 EMAIL=""
 MODE="docker"
 GEMINI_KEY=""
+PROVIDER=""
+CLAUDE_MODEL=""
+ALLOW_IPS=()
 APP_PORT="3000"
 SKIP_NGINX=false
 DO_PULL=true
@@ -38,10 +44,13 @@ while [[ $# -gt 0 ]]; do
     --email)       EMAIL="${2:-}"; shift 2 ;;
     --mode)        MODE="${2:-}"; shift 2 ;;
     --gemini-key)  GEMINI_KEY="${2:-}"; shift 2 ;;
+    --provider)    PROVIDER="${2:-}"; shift 2 ;;
+    --claude-model) CLAUDE_MODEL="${2:-}"; shift 2 ;;
+    --allow-ip)    ALLOW_IPS+=("${2:-}"); shift 2 ;;
     --app-port)    APP_PORT="${2:-}"; shift 2 ;;
     --skip-nginx)  SKIP_NGINX=true; shift ;;
     --no-pull)     DO_PULL=false; shift ;;
-    -h|--help)     sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '2,23p' "$0"; exit 0 ;;
     *) die "Opción desconocida: $1 (usa --help)" ;;
   esac
 done
@@ -52,6 +61,11 @@ done
 # Validar el formato también protege el reemplazo con sed de set_env
 [[ -z "$GEMINI_KEY" || "$GEMINI_KEY" =~ ^[A-Za-z0-9_-]+$ ]] || die "--gemini-key tiene caracteres no válidos"
 [[ -z "$DOMAIN" || "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || die "--domain no es un dominio válido"
+[[ -z "$PROVIDER" || "$PROVIDER" =~ ^(claude|gemini|ollama|mock)$ ]] || die "--provider debe ser claude, gemini, ollama o mock"
+[[ -z "$CLAUDE_MODEL" || "$CLAUDE_MODEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "--claude-model no es válido"
+for ip in "${ALLOW_IPS[@]}"; do
+  [[ "$ip" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]] || die "--allow-ip '$ip' no es una IP/CIDR válida"
+done
 if ! $SKIP_NGINX && [[ -z "$DOMAIN" ]]; then
   die "Falta --domain (o usa --skip-nginx para exponer la app por IP:puerto sin HTTPS)"
 fi
@@ -104,15 +118,22 @@ set_env() { # set_env CLAVE VALOR → reemplaza o añade la línea sin tocar el 
   fi
 }
 if [[ -n "$GEMINI_KEY" ]]; then
-  set_env AI_PROVIDER gemini
   set_env GEMINI_API_KEY "$GEMINI_KEY"
+  [[ -z "$PROVIDER" ]] && PROVIDER="gemini"
   ok "Gemini configurado"
 fi
-set_env ENABLE_ENGINE_SWITCH false
+if [[ -n "$PROVIDER" ]]; then
+  set_env AI_PROVIDER "$PROVIDER"
+  ok "Motor por defecto: $PROVIDER"
+fi
+[[ -n "$CLAUDE_MODEL" ]] && set_env CLAUDE_MODEL "$CLAUDE_MODEL"
 chown "$REPO_OWNER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 if ! grep -qE '^GEMINI_API_KEY=.{10,}' "$ENV_FILE" && grep -qE '^AI_PROVIDER=gemini' "$ENV_FILE"; then
   warn "AI_PROVIDER=gemini sin API key: Ethan arrancará en modo demo (mock) y lo avisará en la interfaz"
+fi
+if grep -qE '^AI_PROVIDER=claude' "$ENV_FILE" && ! grep -qE '^CLAUDE_CODE_OAUTH_TOKEN=.{20,}' "$ENV_FILE"; then
+  warn "AI_PROVIDER=claude sin CLAUDE_CODE_OAUTH_TOKEN: genera uno con 'claude setup-token' y añádelo a $ENV_FILE"
 fi
 
 # ----------------------------------------------------------------------------- 4. App
@@ -186,6 +207,22 @@ done
 # ----------------------------------------------------------------------------- 6. Nginx + SSL
 if ! $SKIP_NGINX; then
   log "Configurando Nginx para $DOMAIN"
+  # Allowlist de IPs (la plantilla la incluye en location /; el reto de Let's Encrypt queda fuera)
+  ALLOWLIST=/etc/nginx/ethan-allowlist.conf
+  {
+    echo "# Generado por deploy/deploy.sh — IPs con acceso a Ethan. Editar y: nginx -t && systemctl reload nginx"
+    if [[ ${#ALLOW_IPS[@]} -gt 0 ]]; then
+      for ip in "${ALLOW_IPS[@]}"; do echo "allow $ip;"; done
+      echo "deny all;"
+    else
+      echo "allow all;"
+    fi
+  } > "$ALLOWLIST"
+  if [[ ${#ALLOW_IPS[@]} -gt 0 ]]; then
+    ok "Acceso restringido a: ${ALLOW_IPS[*]}"
+  else
+    warn "Sin --allow-ip: la app queda accesible desde cualquier IP"
+  fi
   SITE=/etc/nginx/sites-available/ethan.conf
   # Siempre se regenera desde la plantilla (así un cambio de --app-port o de dominio se aplica);
   # si ya había certificado, Certbot vuelve a instalar el bloque 443 más abajo sin emitir uno nuevo

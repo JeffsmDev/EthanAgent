@@ -33,8 +33,21 @@ FROM node:22-alpine AS runtime
 ENV NODE_ENV=production \
     PORT=4000 \
     DATA_DIR=/app/packages/backend/data \
-    FRONTEND_DIST=/app/packages/frontend/dist
+    FRONTEND_DIST=/app/packages/frontend/dist \
+    PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    DISABLE_AUTOUPDATER=1
 WORKDIR /app
+
+# Claude Code CLI: motor "claude" (usa la suscripción vía CLAUDE_CODE_OAUTH_TOKEN). Versión fijada: se actualiza
+# reconstruyendo con --build-arg CLAUDE_CODE_VERSION=x.y.z. El paquete trae el binario nativo (incluye musl)
+ARG CLAUDE_CODE_VERSION=2.1.283
+# (aquí aún no hay package.json: se fija la versión de pnpm o corepack usaría la última)
+RUN corepack enable \
+ && corepack install -g pnpm@10.31.0 \
+ && pnpm add -g --allow-build=@anthropic-ai/claude-code @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && claude --version
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-deps /app/packages/backend/node_modules ./packages/backend/node_modules

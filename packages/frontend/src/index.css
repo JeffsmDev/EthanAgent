@@ -642,3 +642,78 @@ body {
   color: var(--text-muted);
   cursor: pointer;
 }
+
+/* Selector de motor y comparación de costes */
+.engine-select {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.engine-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.usage-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 4px 4px 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.usage-table td {
+  padding: 7px 4px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+}
+
+.usage-table td:first-child {
+  font-family: var(--font-sans);
+}
+
+.usage-table td strong {
+  display: block;
+  color: var(--text-main);
+  text-transform: capitalize;
+}
+
+.usage-table td span {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.usage-table tr.current td strong {
+  color: var(--color-native);
+}
+
+.usage-table em {
+  font-style: normal;
+  color: var(--color-danger);
+}
+
+.usage-empty,
+.usage-note {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.usage-note {
+  margin-top: 10px;
+}

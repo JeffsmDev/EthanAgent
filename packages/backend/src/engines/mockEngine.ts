@@ -1,9 +1,15 @@
-import { AIEngine, EngineGenerateOptions } from './aiProvider.js';
+import { AIEngine, EngineGenerateOptions, EngineResult } from './aiProvider.js';
 
 export class MockEngine implements AIEngine {
+  readonly provider = 'mock' as const;
+  readonly model = 'scripted';
   name = 'Mock Diagnostic Engine';
 
-  async generateResponse(options: EngineGenerateOptions): Promise<string> {
+  async generateResponse(options: EngineGenerateOptions): Promise<EngineResult> {
+    return { text: this.scriptedReply(options), model: this.model, usage: null };
+  }
+
+  private scriptedReply(options: EngineGenerateOptions): string {
     const isPlacement = options.systemPrompt.includes('PLACEMENT');
     // El paso llega en el system prompt ("Step N of 4"); el historial incluye la bienvenida, no sirve para contar
     const step = Number(options.systemPrompt.match(/Step (\d) of 4/)?.[1] ?? 1);

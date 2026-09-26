@@ -43,8 +43,15 @@ check "GET /api/user/progress" "$([[ $code == 200 ]] && echo true)" "HTTP $code"
 code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' "$BASE/")
 check "GET / (frontend)" "$([[ $code == 200 ]] && echo true)" "HTTP $code"
 
-code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' -X POST "$BASE/api/config/engine" -H 'Content-Type: application/json' -d '{"provider":"mock"}')
-check "POST /api/config/engine bloqueado" "$([[ $code == 403 ]] && echo true)" "HTTP $code (esperado 403)"
+body=$(curl -s --max-time 15 -w $'\n%{http_code}' "$BASE/api/engines")
+code=${body##*$'\n'}; json=${body%$'\n'*}
+check "GET /api/engines" "$([[ $code == 200 && $json == *'"options"'* ]] && echo true)" "HTTP $code, actual: $(printf '%s' "$json" | grep -o '"engineName":"[^"]*"' | head -1 | cut -d'"' -f4)"
+
+code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' "$BASE/api/usage")
+check "GET /api/usage" "$([[ $code == 200 ]] && echo true)" "HTTP $code"
+
+code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code}' -X POST "$BASE/api/config/engine" -H 'Content-Type: application/json' -d '{"provider":"gemini","apiKey":"x"}')
+check "Endpoint inseguro retirado" "$([[ $code == 404 ]] && echo true)" "HTTP $code (esperado 404)"
 
 if $WITH_CHAT; then
   body=$(curl -s --max-time 120 -w $'\n%{http_code}' "$BASE/api/chat" -H 'Content-Type: application/json' \

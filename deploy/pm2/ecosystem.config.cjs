@@ -22,8 +22,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         // Nginx hace proxy a este puerto (el resto de variables viene de packages/backend/.env)
-        PORT: process.env.PORT || 3000,
-        ENABLE_ENGINE_SWITCH: 'false'
+        PORT: process.env.PORT || 3000
       }
     }
   ]

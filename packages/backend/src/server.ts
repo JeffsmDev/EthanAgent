@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { buildSystemPrompt, SessionMode, UserProgressContext } from './agents/tutorPrompt.js';
 import { parseTutorResponse } from './agents/responseParser.js';
 import { ProgressStore, isValidSessionId, ResetScope } from './store/progressStore.js';
+import { UsageStore } from './store/usageStore.js';
 import { ChatMessage } from './engines/aiProvider.js';
-import { engineConfigFromEnv, liveStatus, resetLiveStatusCache, resolveEngine } from './engines/engineFactory.js';
+import { EngineRegistry, engineConfigFromEnv, liveStatus } from './engines/engineFactory.js';
 import { EngineError, withResilience } from './engines/engineErrors.js';
 import { EdgeTtsService } from './voice/edgeTtsService.js';
 
@@ -18,7 +19,9 @@ dotenv.config({ path: path.join(backendRoot, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const progressStore = new ProgressStore(process.env.DATA_DIR || path.join(backendRoot, 'data'));
+const dataDir = process.env.DATA_DIR || path.join(backendRoot, 'data');
+const progressStore = new ProgressStore(dataDir);
+const usageStore = new UsageStore(dataDir);
 
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_HISTORY_MESSAGES = 24;
@@ -28,8 +31,9 @@ const MAX_TTS_CHARS = 1500;
 app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
-// Selección modular del motor de IA: sin API key o con config inválida arranca en mock con aviso, nunca crashea
-let resolved = resolveEngine(engineConfigFromEnv());
+// Selección modular del motor de IA: sin API key o con config inválida arranca en mock con aviso, nunca crashea.
+// El usuario puede cambiar en caliente entre los motores configurados (la elección persiste en data/engine.json)
+const engines = new EngineRegistry(engineConfigFromEnv(), dataDir);
 const ttsService = new EdgeTtsService(process.env.TTS_VOICE || 'en-US-ChristopherNeural');
 
 // Express 4 no captura promesas rechazadas: sin esto una excepción async deja la petición colgada
@@ -50,7 +54,7 @@ function sanitizeHistory(history: unknown): ChatMessage[] {
 
 // Health Check
 app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
-  const engine = await liveStatus(resolved);
+  const engine = await liveStatus(engines.current);
   res.json({
     status: 'online',
     tutor: 'Ethan (Native English Coach)',
@@ -60,23 +64,34 @@ app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
   });
 }));
 
-// Cambio de motor en caliente: solo para desarrollo. En una VPS pública permitiría a cualquiera inyectar su API key
-app.post('/api/config/engine', (req: Request, res: Response) => {
-  if (process.env.ENABLE_ENGINE_SWITCH !== 'true') {
-    return res.status(403).json({ error: 'Engine switching is disabled. Set ENABLE_ENGINE_SWITCH=true (development only).' });
-  }
-  const { provider, apiKey, model } = req.body || {};
-  const envConfig = engineConfigFromEnv();
-  resolved = resolveEngine({
-    ...envConfig,
-    provider,
-    geminiApiKey: apiKey || envConfig.geminiApiKey,
-    geminiModel: provider === 'gemini' ? model || envConfig.geminiModel : envConfig.geminiModel,
-    ollamaModel: provider === 'ollama' || provider === 'local' ? model || envConfig.ollamaModel : envConfig.ollamaModel
-  });
-  resetLiveStatusCache();
-  res.json({ message: `Engine changed to ${resolved.status.engineName}`, activeEngine: resolved.status.engineName, engine: resolved.status });
+// Motores elegibles. Solo se puede elegir entre los que el servidor ya tiene configurados: nunca se aceptan keys
+app.get('/api/engines', (req: Request, res: Response) => {
+  res.json({ current: engines.current.status, options: engines.options() });
 });
+
+app.post('/api/engine', asyncRoute(async (req: Request, res: Response) => {
+  try {
+    const selected = await engines.select(String(req.body?.provider || ''));
+    res.json({ current: await liveStatus(selected), options: engines.options() });
+  } catch (error) {
+    if (error instanceof EngineError) {
+      return res.status(400).json({ error: error.friendlyMessage, code: error.code });
+    }
+    throw error;
+  }
+}));
+
+// Historial de coste por motor para decidir cuál conviene (Claude vs Gemini)
+app.get('/api/usage', (req: Request, res: Response) => {
+  const days = Number(req.query.days);
+  const since = days > 0 ? new Date(Date.now() - days * 86400000).toISOString() : undefined;
+  res.json({ summary: usageStore.summary(since), recent: usageStore.recent(Number(req.query.limit) || 50) });
+});
+
+app.post('/api/usage/reset', asyncRoute(async (req: Request, res: Response) => {
+  await usageStore.reset();
+  res.json({ message: 'Usage history reset' });
+}));
 
 // Chat conversacional con el tutor
 app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
@@ -104,7 +119,9 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
   }
   const safeMode: SessionMode = mode === 'daily_session' ? 'daily_session' : 'placement';
   // Se captura el motor al inicio: un cambio en caliente no afecta a la petición en curso
-  const { engine, resilience } = resolved;
+  const { engine, resilience } = engines.current;
+  const usageSessionId = isValidSessionId(sessionId) ? sessionId : null;
+  const startedAt = Date.now();
   // Si el usuario recarga o cierra la pestaña se aborta la llamada al LLM (res 'close', no req: en Node ≥16 req
   // emite 'close' al terminar de leer el body)
   const clientGone = new AbortController();
@@ -126,12 +143,16 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     const systemPrompt = buildSystemPrompt(safeMode, enrichedContext);
     const safeHistory = sanitizeHistory(history);
 
-    const rawResponse = await withResilience(
+    const result = await withResilience(
       engine.name,
       resilience,
       signal => engine.generateResponse({ systemPrompt, history: safeHistory, userMessage: message.trim(), signal }),
       clientGone.signal
     );
+    const latencyMs = Date.now() - startedAt;
+    const rawResponse = result.text;
+    usageStore.record({ provider: engine.provider, model: result.model, sessionId: usageSessionId, latencyMs, usage: result.usage })
+      .catch(err => console.error('Error registrando consumo:', err));
 
     const { spokenText, upgrades, diagnosticData } = parseTutorResponse(rawResponse);
 
@@ -157,7 +178,15 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
       diagnosticData: diagnosticData?.testCompleted
         ? (savedLevel ? { ...diagnosticData, assignedLevel: savedLevel } : { ...diagnosticData, testCompleted: false })
         : diagnosticData,
-      engineUsed: engine.name
+      engineUsed: engine.name,
+      usage: {
+        provider: engine.provider,
+        model: result.model,
+        latencyMs,
+        costUsd: result.usage?.costUsd ?? 0,
+        costSource: result.usage?.costSource ?? null,
+        session: usageSessionId ? usageStore.sessionCost(usageSessionId) : null
+      }
     });
   } catch (error) {
     if (error instanceof EngineError && error.code === 'CANCELLED') {
@@ -166,6 +195,9 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     }
     if (error instanceof EngineError) {
       console.error(`Error del motor en /api/chat: ${error.message}`);
+      // Los fallos también cuentan al comparar motores (fiabilidad)
+      usageStore.record({ provider: engine.provider, model: engine.model, sessionId: usageSessionId, latencyMs: Date.now() - startedAt, errorCode: error.code })
+        .catch(err => console.error('Error registrando consumo:', err));
       // 503 = servicio de IA no disponible; el frontend muestra friendlyMessage y el usuario puede reintentar
       return res.status(503).json({ error: error.friendlyMessage, code: error.code, retryable: error.retryable });
     }
@@ -300,7 +332,8 @@ process.on('unhandledRejection', reason => {
 
 const server = app.listen(PORT, () => {
   console.log(`🚀 Tutor English Backend iniciado en http://localhost:${PORT}`);
-  console.log(`🧠 Motor de IA activo: ${resolved.status.engineName}${resolved.status.warning ? ` — ${resolved.status.warning}` : ''}`);
+  const { status } = engines.current;
+  console.log(`🧠 Motor de IA activo: ${status.engineName}${status.warning ? ` — ${status.warning}` : ''}`);
 });
 
 server.on('error', (error: NodeJS.ErrnoException) => {

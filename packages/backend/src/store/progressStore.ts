@@ -1,6 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import type { DiagnosticData, NativeUpgrade } from '../agents/responseParser.js';
+import { JsonFile } from './jsonFile.js';
 
 // Persistencia ligera mono-usuario en JSON con escritura atómica (tmp + rename)
 
@@ -80,54 +80,29 @@ function minutesBetween(fromIso: string, to: Date): number {
 }
 
 export class ProgressStore {
-  private readonly filePath: string;
+  private readonly file: JsonFile<UserProgress>;
   private data: UserProgress;
-  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
-    this.filePath = path.join(dataDir, 'progress.json');
-    fs.mkdirSync(dataDir, { recursive: true });
+    this.file = new JsonFile<UserProgress>(path.join(dataDir, 'progress.json'));
     this.data = this.load();
   }
 
   private load(): UserProgress {
-    if (!fs.existsSync(this.filePath)) return emptyProgress();
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-      return {
-        ...emptyProgress(),
-        ...parsed,
-        cefrLevel: normalizeCefrLevel(parsed.cefrLevel),
-        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-        nativeUpgrades: Array.isArray(parsed.nativeUpgrades) ? parsed.nativeUpgrades : []
-      };
-    } catch (error) {
-      // Archivo corrupto: se aparta para inspección y se arranca limpio en vez de crashear
-      const backup = `${this.filePath}.corrupt-${Date.now()}`;
-      console.error(`⚠️ progress.json corrupto, respaldado en ${backup}:`, error);
-      try {
-        fs.renameSync(this.filePath, backup);
-      } catch {
-        /* si no se puede mover, se sobrescribirá en la siguiente escritura */
-      }
-      return emptyProgress();
-    }
+    const parsed = this.file.read() as Partial<UserProgress> | null;
+    if (!parsed || typeof parsed !== 'object') return emptyProgress();
+    return {
+      ...emptyProgress(),
+      ...parsed,
+      cefrLevel: normalizeCefrLevel(parsed.cefrLevel),
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      nativeUpgrades: Array.isArray(parsed.nativeUpgrades) ? parsed.nativeUpgrades : []
+    };
   }
 
-  // Escrituras serializadas: nunca dos writeFile/rename concurrentes sobre el mismo archivo
   private persist(): Promise<void> {
     this.data.updatedAt = new Date().toISOString();
-    const snapshot = JSON.stringify(this.data, null, 2);
-    this.writeQueue = this.writeQueue
-      .then(async () => {
-        const tmp = `${this.filePath}.tmp`;
-        await fs.promises.writeFile(tmp, snapshot, 'utf8');
-        await fs.promises.rename(tmp, this.filePath);
-      })
-      .catch(error => {
-        console.error('❌ Error guardando progreso:', error);
-      });
-    return this.writeQueue;
+    return this.file.write(this.data);
   }
 
   getProgress(): UserProgress {

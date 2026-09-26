@@ -19,7 +19,6 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATA_DIR: /app/packages/backend/data
-      ENABLE_ENGINE_SWITCH: "false"
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:4000"
     volumes:

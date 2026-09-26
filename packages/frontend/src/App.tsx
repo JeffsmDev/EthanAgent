@@ -12,6 +12,8 @@ import {
   Zap,
   VolumeX,
   TrendingUp,
+  Cpu,
+  DollarSign,
   Square,
   Trash2,
   AlertTriangle,
@@ -58,9 +60,44 @@ type Mode = 'placement' | 'daily_session';
 interface EngineStatus {
   activeProvider: string;
   engineName: string;
+  model: string;
   ready: boolean;
   warning: string | null;
 }
+
+interface EngineOption {
+  provider: string;
+  label: string;
+  model: string;
+  available: boolean;
+  reason: string | null;
+}
+
+interface UsageSummary {
+  provider: string;
+  model: string;
+  turns: number;
+  errors: number;
+  sessions: number;
+  totalCostUsd: number;
+  avgCostPerTurnUsd: number;
+  avgCostPerSessionUsd: number;
+  avgLatencyMs: number;
+  costSource: 'reported' | 'estimated' | 'free' | 'unknown' | null;
+}
+
+// Coste en USD legible: los turnos cuestan fracciones de centavo
+function formatUsd(value: number): string {
+  if (value === 0) return '$0';
+  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(3)}`;
+}
+
+const COST_SOURCE_LABEL: Record<string, string> = {
+  reported: 'reported by Claude Code',
+  estimated: 'estimated from public API prices',
+  free: 'local model, no cost',
+  unknown: 'no price table for this model'
+};
 
 const PLACEMENT_WELCOME: Message = {
   id: 'welcome',
@@ -102,6 +139,11 @@ export function App() {
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [activeEngine, setActiveEngine] = useState('Detectando...');
   const [engineWarning, setEngineWarning] = useState<string | null>(null);
+  const [engineOptions, setEngineOptions] = useState<EngineOption[]>([]);
+  const [currentProvider, setCurrentProvider] = useState('');
+  const [pendingProvider, setPendingProvider] = useState<string | null>(null);
+  const [usageSummary, setUsageSummary] = useState<UsageSummary[]>([]);
+  const [sessionCost, setSessionCost] = useState(0);
   const [practiceSeconds, setPracticeSeconds] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -131,8 +173,60 @@ export function App() {
     }
   };
 
+  const loadEngines = async () => {
+    try {
+      const res = await fetch('/api/engines');
+      if (!res.ok) return;
+      const data: { current: EngineStatus; options: EngineOption[] } = await res.json();
+      setEngineOptions(data.options);
+      setCurrentProvider(data.current.activeProvider);
+    } catch {
+      /* sin backend: el banner de health ya lo avisa */
+    }
+  };
+
+  const loadUsage = async () => {
+    try {
+      const res = await fetch('/api/usage');
+      if (!res.ok) return;
+      const data: { summary: UsageSummary[] } = await res.json();
+      setUsageSummary(data.summary.filter(s => s.provider !== 'mock'));
+    } catch {
+      /* no crítico */
+    }
+  };
+
+  const switchEngine = async (provider: string) => {
+    if (provider === currentProvider || pendingProvider) return;
+    setPendingProvider(provider);
+    try {
+      const res = await fetch('/api/engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addSystemMessage(`⚠️ ${data.error || 'Could not switch engine.'}`);
+        return;
+      }
+      const current: EngineStatus = data.current;
+      setCurrentProvider(current.activeProvider);
+      setActiveEngine(current.engineName);
+      setEngineWarning(current.warning);
+      setEngineOptions(data.options);
+      addSystemMessage(`🔀 Ethan now runs on ${current.engineName}. Costs are tracked separately per engine.`);
+    } catch {
+      addSystemMessage('⚠️ Could not switch engine — is the backend running?');
+    } finally {
+      setPendingProvider(null);
+    }
+  };
+
   // Arranque: motor activo + progreso guardado (si ya hay nivel, no se repite el diagnóstico)
   useEffect(() => {
+    loadEngines();
+    loadUsage();
     fetch('/api/health')
       .then(res => res.json())
       .then((data: { activeEngine: string; engine?: EngineStatus }) => {
@@ -261,6 +355,7 @@ export function App() {
     sessionIdRef.current = newSessionId();
     sessionTurnsRef.current = 0;
     setPracticeSeconds(0);
+    setSessionCost(0);
     return savedMinutes;
   };
 
@@ -350,6 +445,10 @@ export function App() {
         return;
       }
       sessionTurnsRef.current += 1;
+      if (data.usage?.session) {
+        setSessionCost(data.usage.session.costUsd);
+      }
+      loadUsage();
 
       const tutorMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -415,6 +514,11 @@ export function App() {
           <div className="metric-pill level-tag">
             <Award size={15} />
             <span>Level: {diagnostic ? diagnostic.assignedLevel : 'Diagnostic'}</span>
+          </div>
+
+          <div className="metric-pill" title="API-equivalent cost of this session (your subscription/free tier is not charged per turn)">
+            <DollarSign size={14} color="var(--color-correction)" />
+            <span>{formatUsd(sessionCost)}</span>
           </div>
 
           <button className="metric-pill pill-button" onClick={handleEndSession} disabled={loading || booting} title="Save this session to your history">
@@ -588,6 +692,57 @@ export function App() {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Engine selector + cost comparison */}
+          <div className="panel-card">
+            <div className="panel-title">
+              <Cpu size={18} color="var(--accent-primary)" />
+              <span>AI Engine & Cost</span>
+            </div>
+            <select
+              className="engine-select"
+              value={pendingProvider ?? currentProvider}
+              disabled={!!pendingProvider || loading}
+              onChange={e => switchEngine(e.target.value)}
+            >
+              {engineOptions.map(o => (
+                <option key={o.provider} value={o.provider} disabled={!o.available}>
+                  {o.label} · {o.model}{o.available ? '' : ` — ${o.reason}`}
+                </option>
+              ))}
+            </select>
+
+            {usageSummary.length === 0 ? (
+              <p className="usage-empty">No usage yet. Practice with each engine to compare cost and speed.</p>
+            ) : (
+              <table className="usage-table">
+                <thead>
+                  <tr>
+                    <th>Engine</th>
+                    <th>Turns</th>
+                    <th>Avg/turn</th>
+                    <th>Speed</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageSummary.map(u => (
+                    <tr key={`${u.provider}-${u.model}`} className={u.provider === currentProvider ? 'current' : ''}>
+                      <td title={u.costSource ? COST_SOURCE_LABEL[u.costSource] : ''}>
+                        <strong>{u.provider}</strong>
+                        <span>{u.model}</span>
+                      </td>
+                      <td>{u.turns}{u.errors > 0 && <em title="failed turns"> ({u.errors}✖)</em>}</td>
+                      <td>{formatUsd(u.avgCostPerTurnUsd)}</td>
+                      <td>{(u.avgLatencyMs / 1000).toFixed(1)}s</td>
+                      <td>{formatUsd(u.totalCostUsd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="usage-note">API-equivalent cost. Claude uses your subscription and Gemini's free tier costs $0 — use this to pick the engine you'd pay for.</p>
           </div>
 
           {/* Persistent Progress Card */}

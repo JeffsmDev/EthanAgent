@@ -8,20 +8,24 @@ export type EngineErrorCode =
   | 'TIMEOUT'          // el proveedor tardó demasiado → reintentar
   | 'NETWORK'          // DNS, conexión rechazada, reset → reintentar
   | 'UPSTREAM'         // 5xx del proveedor → reintentar
-  | 'CANCELLED';       // el cliente cerró la conexión → no reintentar
+  | 'CANCELLED'        // el cliente cerró la conexión → no reintentar
+  | 'QUOTA'            // cuota de la suscripción/plan agotada (se resetea en horas) → no reintentar
+  | 'NOT_CONFIGURED';  // motor no instalado o sin credenciales en el servidor → no reintentar
 
 const RETRYABLE: ReadonlySet<EngineErrorCode> = new Set(['RATE_LIMIT', 'TIMEOUT', 'NETWORK', 'UPSTREAM']);
 
 // Mensajes que ve el usuario en la UI (en inglés, como el resto de la interfaz)
 const FRIENDLY: Record<EngineErrorCode, string> = {
-  AUTH: "Ethan's AI key was rejected. Check GEMINI_API_KEY in packages/backend/.env and restart the server.",
-  MODEL_NOT_FOUND: 'The configured AI model is not available. Update GEMINI_MODEL / OLLAMA_MODEL in the backend .env.',
+  AUTH: "The AI provider rejected Ethan's credentials. Check the key/token in packages/backend/.env and restart the server.",
+  MODEL_NOT_FOUND: 'The configured AI model is not available. Update the model name (GEMINI_MODEL / CLAUDE_MODEL / OLLAMA_MODEL) in the backend .env.',
   BAD_REQUEST: "Ethan couldn't process that message. Try rephrasing it.",
   RATE_LIMIT: 'Ethan is getting too many requests right now. Wait a few seconds and try again.',
   TIMEOUT: 'Ethan took too long to answer. Please try again.',
   NETWORK: "Ethan can't reach the AI service (network problem). Check the connection and try again.",
   UPSTREAM: 'The AI service is having trouble right now. Please try again in a moment.',
-  CANCELLED: 'Request cancelled.'
+  CANCELLED: 'Request cancelled.',
+  QUOTA: 'The usage quota for this AI engine is used up for now. Switch to another engine or try again later.',
+  NOT_CONFIGURED: 'This AI engine is not set up on the server. Pick another engine or check the backend configuration.'
 };
 
 export class EngineError extends Error {
@@ -58,7 +62,15 @@ export function toEngineError(error: unknown, context: string): EngineError {
   }
   if (typeof err?.status === 'number') {
     // Gemini responde 400 (no 401) cuando la API key es inválida
-    const code = err.status === 400 && /api key/i.test(message) ? 'AUTH' : classifyHttpStatus(err.status);
+    if (err.status === 400 && /api key/i.test(message)) {
+      return new EngineError('AUTH', `${context}: HTTP 400 ${message}`);
+    }
+    // 429 = límite por minuto (reintentable) o cuota diaria/de facturación agotada (reintentar no sirve)
+    if (err.status === 429 && /per ?day|daily|billing|exceeded your current quota/i.test(message)) {
+      return new EngineError('QUOTA', `${context}: HTTP 429 ${message}`,
+        'The free daily quota for this AI engine is used up. Switch engine in the side panel or try again tomorrow.');
+    }
+    const code = classifyHttpStatus(err.status);
     return new EngineError(code, `${context}: HTTP ${err.status} ${message}`);
   }
   // fetch de Node lanza TypeError('fetch failed') con la causa real en error.cause

@@ -21,7 +21,9 @@ pnpm start        # http://localhost:4000
 
 | Variable | Valores | Notas |
 |---|---|---|
-| `AI_PROVIDER` | `gemini` \| `ollama` \| `mock` | Sin key válida, `gemini` arranca en modo demo y lo avisa en la UI |
+| `AI_PROVIDER` | `claude` \| `gemini` \| `ollama` \| `mock` | Motor por defecto. Se cambia en caliente desde la UI (tarjeta *AI Engine & Cost*) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | salida de `claude setup-token` | Usa tu suscripción de Claude (Pro/Max) sin API key. En tu PC basta con tener sesión en `claude` |
+| `CLAUDE_MODEL` | `claude-sonnet-5` / `claude-haiku-4-5-20251001` | Sonnet: más natural. Haiku: ~2,5× más barato |
 | `GEMINI_API_KEY` | key de https://aistudio.google.com/apikey | Nunca la subas a git |
 | `GEMINI_MODEL` | `gemini-2.0-flash` | Si la UI dice "model is not available", usa `gemini-2.5-flash` |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `llama3.1:latest` | En Docker: `http://host.docker.internal:11434` |
@@ -56,8 +58,24 @@ pnpm start        # http://localhost:4000
 
 ```bash
 cd /opt/ethan
-sudo bash deploy/deploy.sh --domain ethan.tudominio.com --email tu@email.com --gemini-key TU_API_KEY
+sudo bash deploy/deploy.sh --domain ethan.srv1686217.hstgr.cloud --email tu@email.com \
+  --provider claude --allow-ip TU_IP_PUBLICA            # --allow-ip se puede repetir
 ```
+
+Luego activa Claude con tu suscripción (una sola vez; el token dura ~1 año):
+
+```bash
+claude setup-token                                   # en tu PC o en la VPS; abre el navegador y muestra el token
+sudo nano /opt/ethan/packages/backend/.env           # CLAUDE_CODE_OAUTH_TOKEN=<token>
+cd /opt/ethan && sudo docker compose up -d           # recrea el contenedor con el token
+```
+
+Para comparar con Gemini añade también `GEMINI_API_KEY` (key gratuita de AI Studio) y elige el motor desde la UI.
+La tarjeta **AI Engine & Cost** muestra por motor: turnos, coste medio por turno, latencia y total.
+
+> 🔒 **Acceso por IP**: `--allow-ip` restringe la app en Nginx (403 para el resto) y el firewall de hPanel debe
+> permitir el 443 solo a esas IPs. El 80 queda abierto únicamente para que Let's Encrypt renueve el certificado.
+> Si tu IP de casa cambia, actualiza `/etc/nginx/ethan-allowlist.conf` (+ `nginx -t && systemctl reload nginx`) y la regla del firewall.
 
 El script (idempotente, se puede re-ejecutar):
 1. Instala `git`, `curl`, `nginx`, `certbot` (y Docker si falta).
@@ -80,7 +98,8 @@ Opciones: `--mode pm2` (sin Docker: Node 22 + pnpm + PM2 en el host), `--app-por
 | Estado | `curl -s 127.0.0.1:3000/api/health` | igual |
 | Backup del progreso | `docker run --rm -v ethan_ethan-data:/d -v $PWD:/b alpine tar czf /b/ethan-data.tgz -C /d .` | `tar czf ethan-data.tgz -C packages/backend data` |
 | Restaurar backup | `docker run --rm -v ethan_ethan-data:/d -v $PWD:/b alpine sh -c 'tar xzf /b/ethan-data.tgz -C /d && chown -R 1000:1000 /d'` (el contenedor corre como uid 1000) | `tar xzf ethan-data.tgz -C packages/backend && chown -R ethan: packages/backend/data` |
-| Cambiar API key | editar `packages/backend/.env` → `docker compose up -d` | editar `.env` → reiniciar como arriba |
+| Cambiar API key / token | editar `packages/backend/.env` → `docker compose up -d` | editar `.env` → reiniciar como arriba |
+| Ver costes por motor | `curl -s 127.0.0.1:3000/api/usage` (o la tarjeta *AI Engine & Cost*) | igual |
 
 > En modo PM2 la app **nunca corre como root**: usa el dueño del repo o, si el repo es de root, el usuario de sistema `ethan` (los comandos de arriba asumen este caso). Por eso el repo debe estar en `/opt/ethan` y no dentro de `/root`.
 
@@ -101,6 +120,9 @@ sudo nginx -t && sudo systemctl reload nginx
 | Síntoma | Causa / solución |
 |---|---|
 | Banner "Demo mode: no Gemini API key" | Falta `GEMINI_API_KEY` en `.env` → edita y reinicia |
+| "The Claude session on the server is not valid" | Falta o caducó `CLAUDE_CODE_OAUTH_TOKEN` → `claude setup-token` y reinicia |
+| "Your Claude usage limit is reached" | Agotaste la cuota de tu suscripción → cambia a Gemini en la UI o espera al reset |
+| 403 Forbidden al abrir la app | Tu IP no está en la allowlist (¿cambió tu IP?) → ver "Acceso por IP" |
 | Banner "model is not available" | Google retiró el modelo → `GEMINI_MODEL=gemini-2.5-flash` |
 | El micrófono no hace nada | Estás en `http://` → completa el SSL (re-ejecuta el script con `--email`) |
 | Certbot falla | DNS aún no apunta a la VPS o el puerto 80 está bloqueado en el firewall de hPanel |

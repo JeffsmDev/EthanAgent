@@ -1,10 +1,11 @@
-import { AIEngine, EngineGenerateOptions } from './aiProvider.js';
+import { AIEngine, EngineGenerateOptions, EngineResult } from './aiProvider.js';
 import { EngineError, classifyHttpStatus } from './engineErrors.js';
 
 export class LocalOllamaEngine implements AIEngine {
+  readonly provider = 'ollama' as const;
   name: string;
   readonly baseUrl: string;
-  private model: string;
+  readonly model: string;
 
   constructor(baseUrl: string = 'http://localhost:11434', model: string = 'llama3.1:latest') {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -12,7 +13,7 @@ export class LocalOllamaEngine implements AIEngine {
     this.name = `Local Ollama (${model})`;
   }
 
-  async generateResponse(options: EngineGenerateOptions): Promise<string> {
+  async generateResponse(options: EngineGenerateOptions): Promise<EngineResult> {
     const messages = [
       { role: 'system', content: options.systemPrompt },
       ...options.history,
@@ -38,12 +39,24 @@ export class LocalOllamaEngine implements AIEngine {
       throw new EngineError(classifyHttpStatus(res.status), `Ollama HTTP ${res.status}: ${detail.slice(0, 200)}`);
     }
 
-    const data = await res.json() as { message?: { content?: string } };
+    const data = await res.json() as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number };
     const content = data?.message?.content;
     if (!content) {
       throw new EngineError('UPSTREAM', 'Ollama devolvió una respuesta vacía');
     }
-    return content;
+    return {
+      text: content,
+      model: this.model,
+      usage: {
+        inputTokens: data.prompt_eval_count ?? 0,
+        outputTokens: data.eval_count ?? 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        // Modelo local: sin coste por token (solo electricidad/hardware)
+        costUsd: 0,
+        costSource: 'free'
+      }
+    };
   }
 
   // Sondeo rápido para el estado en /api/health (no lanza)
