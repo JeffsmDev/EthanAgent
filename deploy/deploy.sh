@@ -221,7 +221,7 @@ if ! $SKIP_NGINX; then
   if [[ ${#ALLOW_IPS[@]} -gt 0 ]]; then
     ok "Acceso restringido a: ${ALLOW_IPS[*]}"
   else
-    warn "Sin --allow-ip: la app queda accesible desde cualquier IP"
+    warn "Nginx sin allowlist (--allow-ip): el acceso por IP depende del firewall de Hostinger (443 restringido)"
   fi
   SITE=/etc/nginx/sites-available/ethan.conf
   # Siempre se regenera desde la plantilla (así un cambio de --app-port o de dominio se aplica);
