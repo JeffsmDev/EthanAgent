@@ -34,9 +34,10 @@ diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con 
 | E — Motor Claude (suscripción) + costes | ✅ | `claudeCliEngine.ts`: `claude -p` desatendido (sin tools/MCP/settings, sin thinking por defecto: −2,7 s/turno), auth por `CLAUDE_CODE_OAUTH_TOKEN`. `EngineRegistry`: cambio claude⇄gemini⇄mock desde la UI, persistido. `usageStore`: coste/latencia/errores por turno → `GET /api/usage` + tarjeta *AI Engine & Cost*. Retirado `/api/config/engine` (aceptaba keys del cliente). CLI dentro de la imagen Docker (musl). Medido: Sonnet 5 ≈ $0,01–0,02/turno y 7–15 s; Haiku 4.5 ≈ $0,004/turno |
 | D — Pruebas y validación | ✅ | Build limpio + `tsc --noEmit` en ambos paquetes; smoke test 6/6 (`/api/health`, `/api/chat`, `/api/voice/synthesize?text=Hello`, progress, frontend, config bloqueado) en local, en Docker y en Ubuntu; capturas de UI (usuario nuevo / que regresa) verificadas |
 
+| F — Producción en VPS Hostinger | ✅ | https://ethan.srv1686217.hstgr.cloud (Docker, Nginx, Let's Encrypt hasta 2026-12-25 con renovación automática). Acceso: firewall Hostinger con 22/443 solo desde la IP del usuario (dinámica → actualizar reglas cuando cambie), 80 abierto solo para ACME. Smoke test HTTPS 7/7. Motor por defecto `claude` (Sonnet 5); falta el token |
+
 ## Pendiente / siguientes pasos
 
-- Generar `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) y ponerlo en el `.env` de la VPS.
+- Generar `CLAUDE_CODE_OAUTH_TOKEN` en la VPS (`ssh -t vps-agent "~/.local/bin/claude setup-token"`) y guardarlo con `sudo bash /opt/ethan/deploy/set-claude-token.sh`. La sesión interactiva de Claude de `claudeagent` está caducada (re-login con `claude` → `/login` si se quiere usar allí).
 - (Opcional) `GEMINI_API_KEY` gratuita de AI Studio para comparar costes con Claude y decidir motor.
-- Subir el repo (no es git todavía) y ejecutar `deploy/deploy.sh` en la VPS.
 - Activar basic auth en Nginx (la app no tiene login).
