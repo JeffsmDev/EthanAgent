@@ -7,7 +7,7 @@
 #
 # Opciones:
 #   --domain <dominio>     Dominio apuntando (registro A) a la IP de la VPS. Necesario para Nginx + SSL
-#   --email <email>        Email para Let's Encrypt (si falta, no se emite SSL)
+#   --email <email|none>   Email para Let's Encrypt (avisos de caducidad). "none" = SSL sin email. Si falta, no hay SSL
 #   --mode docker|pm2      docker (default, recomendado) o pm2 (Node 22 + pnpm directamente en el host)
 #   --provider <motor>     Motor por defecto: claude | gemini | ollama | mock (se puede cambiar luego desde la UI)
 #   --claude-model <id>    Modelo del motor claude (default claude-sonnet-5)
@@ -247,7 +247,11 @@ if ! $SKIP_NGINX; then
       fi
     fi
     CERTBOT_ARGS=(--nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --keep-until-expiring)
-    [[ -n "$EMAIL" ]] && CERTBOT_ARGS+=(-m "$EMAIL")
+    if [[ "$EMAIL" == "none" ]]; then
+      CERTBOT_ARGS+=(--register-unsafely-without-email)
+    elif [[ -n "$EMAIL" ]]; then
+      CERTBOT_ARGS+=(-m "$EMAIL")
+    fi
     log "Configurando SSL (Let's Encrypt)"
     if certbot "${CERTBOT_ARGS[@]}"; then
       ok "HTTPS activo (renovación automática vía certbot.timer)"
