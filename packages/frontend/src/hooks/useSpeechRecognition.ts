@@ -25,7 +25,26 @@ declare global {
   }
 }
 
-export function useSpeechRecognition(onResultCallback: (text: string) => void) {
+// Traduce los códigos de error de la Web Speech API a un mensaje útil para el usuario
+function describeSpeechError(code: string): string | null {
+  switch (code) {
+    case 'network':
+      return "Your browser's speech recognition service is unavailable (Brave blocks it). Use Chrome/Edge, or type your answer.";
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone access is blocked. Allow it in the address bar (🔒 icon) and try again.';
+    case 'audio-capture':
+      return 'No microphone was found. Check that one is connected.';
+    case 'no-speech':
+      return "I didn't hear anything — try again a bit closer to the mic.";
+    case 'aborted':
+      return null;
+    default:
+      return `Speech recognition failed (${code}). You can type your answer instead.`;
+  }
+}
+
+export function useSpeechRecognition(onResultCallback: (text: string) => void, onErrorCallback?: (message: string) => void) {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isSupported, setIsSupported] = useState(true);
@@ -33,6 +52,8 @@ export function useSpeechRecognition(onResultCallback: (text: string) => void) {
   // El callback cambia en cada render del padre; guardarlo en un ref evita recrear (y abortar) el reconocimiento
   const onResultRef = useRef(onResultCallback);
   onResultRef.current = onResultCallback;
+  const onErrorRef = useRef(onErrorCallback);
+  onErrorRef.current = onErrorCallback;
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -63,6 +84,8 @@ export function useSpeechRecognition(onResultCallback: (text: string) => void) {
     recognition.onerror = (event: any) => {
       console.warn('Speech recognition error:', event.error);
       setIsListening(false);
+      const message = describeSpeechError(String(event.error));
+      if (message) onErrorRef.current?.(message);
     };
 
     recognition.onend = () => {

@@ -26,6 +26,7 @@ packages/backend    Node 22 + TS + Express (ESM, NodeNext → imports con extens
   src/store/usageStore.ts      historial de coste/latencia por turno y motor (data/usage.json)
   src/store/jsonFile.ts        helper de JSON con escritura atómica compartido por los stores
   src/voice/edgeTtsService.ts  TTS neuronal (msedge-tts). El texto SIEMPRE se escapa (SSML)
+  src/voice/sttService.ts      voz → texto con whisper.cpp en el servidor (Docker). Sin él, el frontend usa Web Speech
   data/progress.json       datos del usuario (gitignored, volumen en Docker)
 packages/frontend   React 18 + Vite + CSS vanilla (proxy /api → :4000 en dev)
 Dockerfile, docker-compose.yml   imagen única (API + frontend), puerto solo en 127.0.0.1

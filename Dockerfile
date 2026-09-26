@@ -28,6 +28,23 @@ COPY packages/frontend/package.json packages/frontend/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --filter backend
 
+# ---------- whisper: voz → texto en el propio servidor (funciona en cualquier navegador, sin API ni coste) ----------
+# Misma base que el runtime para enlazar la misma musl/libstdc++. AVX2 explícito (GGML_NATIVE=OFF) para que el
+# binario no dependa de la CPU donde se compila. Modelo: base.en (rápido en 2 vCPU); small.en = más preciso y ~3× lento
+FROM node:22-alpine AS whisper
+ARG WHISPER_CPP_VERSION=v1.9.4
+ARG WHISPER_MODEL=base.en
+RUN apk add --no-cache build-base cmake git bash curl
+RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggml-org/whisper.cpp /src
+WORKDIR /src
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
+      -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_OPENMP=OFF \
+      -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF \
+ && cmake --build build -j"$(nproc)" --target whisper-cli \
+ && mkdir -p /models \
+ && bash ./models/download-ggml-model.sh ${WHISPER_MODEL} /models \
+ && mv /models/ggml-${WHISPER_MODEL}.bin /models/whisper-model.bin
+
 # ---------- runtime: imagen mínima, usuario sin privilegios ----------
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production \
@@ -48,6 +65,11 @@ RUN corepack enable \
  && corepack install -g pnpm@10.31.0 \
  && pnpm add -g --allow-build=@anthropic-ai/claude-code @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
  && claude --version
+
+COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper /models/whisper-model.bin /opt/whisper/whisper-model.bin
+ENV WHISPER_BIN=/usr/local/bin/whisper-cli \
+    WHISPER_MODEL_PATH=/opt/whisper/whisper-model.bin
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-deps /app/packages/backend/node_modules ./packages/backend/node_modules

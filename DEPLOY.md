@@ -127,3 +127,4 @@ sudo nginx -t && sudo systemctl reload nginx
 | El micrófono no hace nada | Estás en `http://` → completa el SSL (re-ejecuta el script con `--email`) |
 | Certbot falla | DNS aún no apunta a la VPS o el puerto 80 está bloqueado en el firewall de hPanel |
 | Ethan responde pero no se oye | Edge TTS inaccesible: la app usa la voz del navegador como respaldo; revisa `docker compose logs` |
+| El micrófono graba pero no transcribe (local, sin Docker) | En local no hay whisper.cpp: se usa la Web Speech API, que **Brave bloquea**. Usa Chrome/Edge o la versión Docker |

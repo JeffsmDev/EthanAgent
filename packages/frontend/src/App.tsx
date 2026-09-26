@@ -17,9 +17,12 @@ import {
   Square,
   Trash2,
   AlertTriangle,
-  X
+  X,
+  Play,
+  Loader2
 } from 'lucide-react';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 
 interface NativeUpgrade {
   original: string;
@@ -145,6 +148,11 @@ export function App() {
   const [usageSummary, setUsageSummary] = useState<UsageSummary[]>([]);
   const [sessionCost, setSessionCost] = useState(0);
   const [practiceSeconds, setPracticeSeconds] = useState(0);
+  // Los navegadores bloquean el audio sin un clic previo: "Start session" es ese clic y Ethan saluda en voz alta
+  const [started, setStarted] = useState(false);
+  // true = grabar y transcribir en el servidor (whisper.cpp): funciona en Brave/Firefox. false = Web Speech del navegador
+  const [sttAvailable, setSttAvailable] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -153,13 +161,14 @@ export function App() {
   const practiceSecondsRef = useRef(0);
   practiceSecondsRef.current = practiceSeconds;
 
-  // Timer para sesión diaria
+  // Timer de la sesión: corre desde que el usuario pulsa "Start session"
   useEffect(() => {
+    if (!started) return;
     const timer = setInterval(() => {
       setPracticeSeconds(prev => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [started]);
 
   const loadProgress = async (): Promise<UserProgress | null> => {
     try {
@@ -229,9 +238,10 @@ export function App() {
     loadUsage();
     fetch('/api/health')
       .then(res => res.json())
-      .then((data: { activeEngine: string; engine?: EngineStatus }) => {
+      .then((data: { activeEngine: string; engine?: EngineStatus; stt?: { available: boolean } }) => {
         setActiveEngine(data.activeEngine);
         setEngineWarning(data.engine?.warning ?? null);
+        setSttAvailable(!!data.stt?.available);
       })
       .catch(() => {
         setActiveEngine('Offline');
@@ -270,12 +280,17 @@ export function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Hook Web Speech API
-  const { isListening, transcript, toggleListening } = useSpeechRecognition((recognizedText) => {
-    if (recognizedText) {
-      handleSendMessage(recognizedText);
-    }
-  });
+  // Hook Web Speech API (respaldo cuando el servidor no transcribe)
+  const { isListening, transcript, toggleListening } = useSpeechRecognition(
+    recognizedText => {
+      if (recognizedText) {
+        handleSendRef.current(recognizedText);
+      }
+    },
+    message => addSystemMessage(`🎙️ ${message}`)
+  );
+  const recorder = useVoiceRecorder();
+  const micActive = isListening || recorder.isRecording;
 
   // Respaldo si Edge TTS no está disponible: voz nativa del navegador (peor calidad, pero Ethan no se queda mudo)
   const speakWithBrowser = (text: string) => {
@@ -391,6 +406,7 @@ export function App() {
     setMode('placement');
     setTestStep(1);
     setMessages([PLACEMENT_WELCOME]);
+    if (PLACEMENT_WELCOME.spokenText) playAudio(PLACEMENT_WELCOME.spokenText);
     await loadProgress();
   };
 
@@ -489,6 +505,70 @@ export function App() {
     }
   };
 
+  const handleSendRef = useRef(handleSendMessage);
+  handleSendRef.current = handleSendMessage;
+
+  // Micrófono: graba → transcribe en el servidor → envía. Para solo al dejar de hablar (o al pulsar de nuevo)
+  const handleMicClick = async () => {
+    if (!sttAvailable) {
+      stopAudio();
+      toggleListening();
+      return;
+    }
+    if (recorder.isRecording) {
+      recorder.stop();
+      return;
+    }
+    // Ethan se calla para no grabarse a sí mismo por los altavoces
+    stopAudio();
+    let result;
+    try {
+      result = await recorder.record();
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      addSystemMessage(name === 'NotAllowedError'
+        ? '🎙️ Microphone access is blocked. Allow it in the address bar (🔒 icon) and try again.'
+        : name === 'NotFoundError'
+          ? '🎙️ No microphone was found. Check that one is connected.'
+          : "🎙️ Couldn't start the microphone. You can type your answer instead.");
+      return;
+    }
+    if (result.kind === 'no-speech') {
+      addSystemMessage("🎙️ I didn't hear anything — tap the mic and speak a bit closer.");
+      return;
+    }
+    setTranscribing(true);
+    try {
+      const res = await fetch('/api/voice/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: result.wav
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'STT_UNAVAILABLE') setSttAvailable(false);
+        addSystemMessage(`🎙️ ${data.error || "Couldn't transcribe your recording."}`);
+        return;
+      }
+      if (!data.text) {
+        addSystemMessage("🎙️ I couldn't make out any words — try again.");
+        return;
+      }
+      await handleSendRef.current(data.text);
+    } catch {
+      addSystemMessage('🎙️ Connection problem while sending your recording. Try again.');
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const startSession = () => {
+    setStarted(true);
+    setPracticeSeconds(0);
+    const greeting = messages.find(m => m.sender === 'tutor' && m.spokenText);
+    if (greeting?.spokenText) playAudio(greeting.spokenText);
+  };
+
   const formatTimer = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
@@ -555,7 +635,15 @@ export function App() {
             <div className={`v-bar ${isSpeakingAudio ? 'active' : ''}`} />
             <div className={`v-bar ${isSpeakingAudio ? 'active' : ''}`} />
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: '10px' }}>
-              {isSpeakingAudio ? 'Ethan is speaking...' : isListening ? 'Listening to your microphone...' : 'Ready for conversation'}
+              {isSpeakingAudio
+                ? 'Ethan is speaking...'
+                : transcribing
+                  ? 'Transcribing your voice...'
+                  : recorder.isRecording
+                    ? 'Recording — just stop talking to send (or tap the mic)'
+                    : isListening
+                      ? 'Listening to your microphone...'
+                      : 'Ready for conversation'}
             </span>
             {isSpeakingAudio && (
               <button
@@ -567,6 +655,21 @@ export function App() {
               </button>
             )}
           </div>
+
+          {/* Pantalla de inicio: el clic desbloquea el audio y Ethan abre la conversación hablando */}
+          {!started && !booting && (
+            <div className="start-overlay">
+              <div className="start-card">
+                <div className="start-avatar">🎙️</div>
+                <h2>{mode === 'placement' ? 'Ready for your diagnostic?' : "Ready for today's session?"}</h2>
+                <p>Ethan will greet you out loud. Turn your volume up, then answer with the mic or by typing.</p>
+                <button className="start-button" onClick={startSession}>
+                  <Play size={18} />
+                  <span>Start session</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Messages */}
           <div className="messages-viewport">
@@ -617,6 +720,11 @@ export function App() {
                 ))}
               </div>
             ))}
+            {transcribing && (
+              <div className="message-bubble user" style={{ fontStyle: 'italic', opacity: 0.7 }}>
+                Transcribing your voice...
+              </div>
+            )}
             {loading && (
               <div className="message-bubble assistant" style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>
                 Ethan is thinking like a native...
@@ -628,19 +736,19 @@ export function App() {
           {/* Control Dock */}
           <div className="control-dock">
             <button
-              className={`mic-button ${isListening ? 'recording' : ''}`}
-              onClick={toggleListening}
-              disabled={(loading || booting) && !isListening}
-              title={isListening ? 'Stop listening' : 'Start speaking'}
+              className={`mic-button ${micActive ? 'recording' : ''}`}
+              onClick={handleMicClick}
+              disabled={(loading || booting || transcribing) && !micActive}
+              title={micActive ? 'Stop and send' : 'Start speaking'}
             >
-              {isListening ? <MicOff size={24} /> : <Mic size={24} />}
+              {transcribing ? <Loader2 size={24} className="spin" /> : micActive ? <MicOff size={24} /> : <Mic size={24} />}
             </button>
 
             <div className="input-box-wrapper">
               <input
                 type="text"
                 className="chat-input"
-                placeholder={isListening ? 'Listening...' : 'Speak with mic or type your response in English...'}
+                placeholder={micActive ? 'Listening...' : transcribing ? 'Transcribing...' : 'Speak with mic or type your response in English...'}
                 value={transcript || inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}

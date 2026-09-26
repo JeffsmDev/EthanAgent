@@ -36,6 +36,8 @@ diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con 
 
 | F — Producción en VPS Hostinger | ✅ | https://ethan.srv1686217.hstgr.cloud (Docker, Nginx, Let's Encrypt hasta 2026-12-25 con renovación automática). Acceso: firewall Hostinger con 22/443 solo desde la IP del usuario (dinámica → actualizar reglas cuando cambie), 80 abierto solo para ACME. Smoke test HTTPS 7/7. Motor por defecto `claude` (Sonnet 5); falta el token |
 
+| G — Voz robusta + Ethan habla primero | ✅ | Brave bloquea la Web Speech API (error `network`, antes silenciado). Nuevo: grabación Web Audio → WAV 16 kHz → `POST /api/voice/transcribe` → whisper.cpp v1.9.4 `base.en` compilado en la imagen (AVX2). Conserva los errores del alumno (verificado). Auto-stop por silencio. Pantalla "Start session": el clic desbloquea el audio y Ethan saluda en voz alta. Errores de micrófono visibles. E2E con micrófono simulado en Edge OK |
+
 ## Pendiente / siguientes pasos
 
 - Generar `CLAUDE_CODE_OAUTH_TOKEN` en la VPS (`ssh -t vps-agent "~/.local/bin/claude setup-token"`) y guardarlo con `sudo bash /opt/ethan/deploy/set-claude-token.sh`. La sesión interactiva de Claude de `claudeagent` está caducada (re-login con `claude` → `/login` si se quiere usar allí).

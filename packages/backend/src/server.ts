@@ -12,6 +12,7 @@ import { ChatMessage } from './engines/aiProvider.js';
 import { EngineRegistry, engineConfigFromEnv } from './engines/engineFactory.js';
 import { EngineError, withResilience } from './engines/engineErrors.js';
 import { EdgeTtsService } from './voice/edgeTtsService.js';
+import { WhisperSttService } from './voice/sttService.js';
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // .env de packages/backend sin depender del cwd (pnpm, PM2, node directo). Las variables ya definidas (Docker/PM2) mandan
@@ -35,6 +36,9 @@ app.use(express.json({ limit: '256kb' }));
 // El usuario puede cambiar en caliente entre los motores configurados (la elección persiste en data/engine.json)
 const engines = new EngineRegistry(engineConfigFromEnv(), dataDir);
 const ttsService = new EdgeTtsService(process.env.TTS_VOICE || 'en-US-ChristopherNeural');
+const sttService = new WhisperSttService(process.env.WHISPER_BIN, process.env.WHISPER_MODEL_PATH, Number(process.env.WHISPER_THREADS));
+// 60 s de WAV 16 kHz mono 16 bits ≈ 1,9 MB
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
 // Express 4 no captura promesas rechazadas: sin esto una excepción async deja la petición colgada
 const asyncRoute = (handler: (req: Request, res: Response) => Promise<unknown>): RequestHandler =>
@@ -60,7 +64,9 @@ app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
     tutor: 'Ethan (Native English Coach)',
     activeEngine: engine.engineName,
     engine,
-    ttsVoice: process.env.TTS_VOICE || 'en-US-ChristopherNeural'
+    ttsVoice: process.env.TTS_VOICE || 'en-US-ChristopherNeural',
+    // true → el frontend graba y transcribe en el servidor (funciona en Brave/Firefox); false → Web Speech del navegador
+    stt: { available: sttService.available, engine: sttService.available ? 'whisper.cpp' : null }
   });
 }));
 
@@ -294,6 +300,31 @@ app.get('/api/voice/synthesize', asyncRoute(async (req: Request, res: Response) 
   res.on('close', () => stream.destroy());
   stream.pipe(res);
 }));
+
+// Voz → texto (whisper.cpp en el servidor). Cuerpo: WAV PCM 16 kHz mono
+app.post('/api/voice/transcribe', express.raw({ type: ['audio/wav', 'audio/x-wav', 'application/octet-stream'], limit: MAX_AUDIO_BYTES }),
+  asyncRoute(async (req: Request, res: Response) => {
+    if (!sttService.available) {
+      return res.status(501).json({ error: 'Server-side transcription is not configured.', code: 'STT_UNAVAILABLE' });
+    }
+    const audio = req.body;
+    if (!Buffer.isBuffer(audio) || audio.length < 44 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') {
+      return res.status(400).json({ error: 'Expected a WAV audio body.', code: 'BAD_AUDIO' });
+    }
+    const clientGone = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) clientGone.abort();
+    });
+    const startedAt = Date.now();
+    try {
+      const text = await sttService.transcribe(audio, clientGone.signal);
+      res.json({ text, latencyMs: Date.now() - startedAt });
+    } catch (error) {
+      if (clientGone.signal.aborted) return;
+      console.error('Error transcribiendo audio:', error);
+      res.status(502).json({ error: "Sorry, I couldn't process that recording. Try again or type your answer.", code: 'STT_FAILED' });
+    }
+  }));
 
 // Rutas /api inexistentes → 404 JSON (no deben caer en el index.html del frontend)
 app.use('/api', (req: Request, res: Response) => {
