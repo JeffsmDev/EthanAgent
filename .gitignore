@@ -1,0 +1,20 @@
+# Dependencias y builds
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secretos: NUNCA commitear (usa packages/backend/.env.example como plantilla)
+.env
+.env.*
+!.env.example
+
+# Progreso del usuario (vive en el servidor / volumen Docker)
+packages/backend/data/
+
+# Logs y SO
+*.log
+.DS_Store
+Thumbs.db
+
+# Herramientas locales
+graphify-out/

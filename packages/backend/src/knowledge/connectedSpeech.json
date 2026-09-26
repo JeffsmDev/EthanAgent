@@ -1,0 +1,26 @@
+{
+  "description": "Connected speech rules, phonetic reductions, and rhythm differences for Spanish speakers",
+  "rules": [
+    {
+      "topic": "Stress-Timed vs Syllable-Timed Rhythm",
+      "explanation": "Spanish is syllable-timed (every syllable gets roughly equal time). English is stress-timed (stressed words take the rhythm, unstressed words compress).",
+      "instruction": "Encourage compressing auxiliary words (e.g., 'can you', 'do you', 'would have') into their reduced forms."
+    },
+    {
+      "topic": "The 3 -ed Endings",
+      "rules": [
+        {"ending": "/ɪd/", "condition": "Verbs ending in /t/ or /d/ sounds (e.g., wanted, needed, decided)"},
+        {"ending": "/t/", "condition": "Verbs ending in voiceless sounds (p, k, f, s, sh, ch) -> worked, stopped, laughed, watched"},
+        {"ending": "/d/", "condition": "All other voiced sounds and vowels -> played, lived, called, cleaned"}
+      ],
+      "commonMistake": "Spanish speakers tend to pronounce -ed as a full separate extra syllable in all verbs ('work-ed', 'play-ed')."
+    },
+    {
+      "topic": "Connected Speech & Linking",
+      "patterns": [
+        {"type": "Consonant to Vowel", "example": "Hold on -> 'hol-don', Check it out -> 'che-ki-dout'"},
+        {"type": "Common Reductions", "examples": ["going to -> gonna", "want to -> wanna", "kind of -> kinda", "could have -> coulda"]}
+      ]
+    }
+  ]
+}

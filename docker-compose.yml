@@ -1,0 +1,37 @@
+# Ethan — Native English Coach
+# Uso: docker compose up -d --build
+# La app queda en 127.0.0.1:${APP_PORT:-3000} y Nginx del host la publica en 80/443 con SSL (ver deploy/).
+# Publicar en 127.0.0.1 evita que Docker salte el firewall UFW exponiendo el puerto a Internet.
+
+# Nombre fijo del proyecto → volumen predecible "ethan_ethan-data" (backups)
+name: ethan
+
+services:
+  ethan:
+    build: .
+    image: ethan-english-coach:latest
+    container_name: ethan-english-coach
+    restart: unless-stopped
+    env_file:
+      - packages/backend/.env
+    environment:
+      # Fijos dentro del contenedor (tienen prioridad sobre el .env)
+      NODE_ENV: production
+      PORT: 4000
+      DATA_DIR: /app/packages/backend/data
+      ENABLE_ENGINE_SWITCH: "false"
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:4000"
+    volumes:
+      - ethan-data:/app/packages/backend/data
+    # Permite usar Ollama instalado en el host: OLLAMA_BASE_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ethan-data:

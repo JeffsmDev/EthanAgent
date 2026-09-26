@@ -1,0 +1,33 @@
+{
+  "description": "High-frequency native English collocations (Lexical Approach)",
+  "categories": [
+    {
+      "verb": "make",
+      "naturalPairs": ["make a decision", "make an effort", "make sense", "make a difference", "make a point", "make a mistake"],
+      "commonSpanishMistakes": ["do a decision -> make a decision", "have sense -> make sense"]
+    },
+    {
+      "verb": "take",
+      "naturalPairs": ["take a break", "take advantage of", "take for granted", "take into account", "take a chance", "take a toll on"],
+      "commonSpanishMistakes": ["have a break -> take a break", "make a rest -> take a rest"]
+    },
+    {
+      "verb": "catch / miss",
+      "naturalPairs": ["catch a cold", "catch a flight", "catch up with someone", "miss the bus", "miss an opportunity"],
+      "commonSpanishMistakes": ["lose the bus -> miss the bus", "lose the flight -> miss the flight"]
+    },
+    {
+      "verb": "run",
+      "naturalPairs": ["run out of time", "run into someone", "run a business", "run errands", "run late"],
+      "commonSpanishMistakes": ["finish time -> run out of time", "do errands -> run errands"]
+    },
+    {
+      "prepositionCollocations": [
+        {"phrase": "depend on", "clunky": "depend of", "note": "Spanish speakers say 'depende de', in English it's always 'on'"},
+        {"phrase": "consist of", "clunky": "consist in", "note": "Always 'consist of'"},
+        {"phrase": "married to", "clunky": "married with", "note": "In English you are married to someone"},
+        {"phrase": "good at", "clunky": "good in", "note": "You are good at something, not good in it"}
+      ]
+    }
+  ]
+}

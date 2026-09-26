@@ -1,0 +1,6 @@
+# Scripts y configs de servidor siempre con LF (bash/nginx fallan con CRLF)
+*.sh text eol=lf
+*.conf text eol=lf
+*.template text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf

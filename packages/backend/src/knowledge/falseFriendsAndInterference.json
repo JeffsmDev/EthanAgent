@@ -1,0 +1,65 @@
+{
+  "description": "Spanish-to-English linguistic interferences, false cognates, and habitual syntax traps",
+  "entries": [
+    {
+      "word": "Actually",
+      "spanishConfusion": "Confundido con 'Actualmente'",
+      "realMeaning": "En realidad, de hecho (In fact / really)",
+      "correctForActualmente": "Currently / Right now / Nowadays"
+    },
+    {
+      "word": "Realize",
+      "spanishConfusion": "Confundido con 'Realizar'",
+      "realMeaning": "Darse cuenta de algo (become aware of)",
+      "correctForRealizar": "Carry out / Make / Perform / Execute"
+    },
+    {
+      "word": "Notice",
+      "spanishConfusion": "Confundido con 'Noticia'",
+      "realMeaning": "Notar / Percibir (verb) o aviso/letrero (noun)",
+      "correctForNoticia": "News (item) / announcement"
+    },
+    {
+      "word": "Sensible vs Sensitive",
+      "spanishConfusion": "Sensible = Sensato / razonable (con sentido común). Sensitive = Sensible emocionalmente o físicamente.",
+      "realMeaning": "A sensible decision = una decisión sensata.",
+      "correctForSensible": "Sensitive"
+    },
+    {
+      "word": "Support vs Soportar",
+      "spanishConfusion": "Soportar (aguantar a alguien/algo)",
+      "realMeaning": "Support = apoyar / respaldar.",
+      "correctForSoportar": "Tolerate / Stand / Put up with ('I can't stand it')"
+    },
+    {
+      "word": "Assist vs Attend",
+      "spanishConfusion": "Asistir a una reunión/clase",
+      "realMeaning": "Assist = Ayudar. Attend = Asistir / presenciar.",
+      "correctForAsistir": "Attend ('I attended the meeting')"
+    },
+    {
+      "syntacticTraps": [
+        {
+          "trap": "I have 28 years",
+          "correction": "I am 28 years old / I'm 28",
+          "why": "Age is a state of being in English (verb TO BE), not a possession."
+        },
+        {
+          "trap": "Explain me the problem",
+          "correction": "Explain the problem TO me / Explain to me how it works",
+          "why": "Explain requires preposition 'to' before the person receiving the explanation."
+        },
+        {
+          "trap": "I agree with that (pronounced 'I am agree')",
+          "correction": "I agree (verb, not adjective)",
+          "why": "Agree is an active verb: 'I agree', 'I don't agree'."
+        },
+        {
+          "trap": "People is very nice",
+          "correction": "People are very nice",
+          "why": "'People' is plural in English."
+        }
+      ]
+    }
+  ]
+}

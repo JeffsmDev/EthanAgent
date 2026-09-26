@@ -1,0 +1,59 @@
+{
+  "description": "Contemporary everyday and workplace idioms (2024-2026 conversational standard)",
+  "idioms": [
+    {
+      "expression": "cut to the chase",
+      "meaning": "Get directly to the point without wasting time",
+      "naturalUsage": "Let's cut to the chase and discuss the budget.",
+      "textbookAlternative": "Let us talk about the main topic directly."
+    },
+    {
+      "expression": "touch base",
+      "meaning": "Briefly connect or check in with someone",
+      "naturalUsage": "Let's touch base next Monday to review the status.",
+      "textbookAlternative": "Let us have a short conversation next Monday."
+    },
+    {
+      "expression": "call it a day",
+      "meaning": "Finish working for the day",
+      "naturalUsage": "We've made solid progress; let's call it a day.",
+      "textbookAlternative": "Let us stop working today."
+    },
+    {
+      "expression": "no-brainer",
+      "meaning": "A decision so obvious that you don't even need to think about it",
+      "naturalUsage": "Upgrading this server is a complete no-brainer.",
+      "textbookAlternative": "This is a very easy decision."
+    },
+    {
+      "expression": "keep someone in the loop",
+      "meaning": "Keep someone updated on progress",
+      "naturalUsage": "Keep me in the loop with any updates on the deployment.",
+      "textbookAlternative": "Give me regular information about the process."
+    },
+    {
+      "expression": "play it by ear",
+      "meaning": "Handle a situation spontaneously rather than following a strict plan",
+      "naturalUsage": "We don't know the exact schedule yet, so let's play it by ear.",
+      "textbookAlternative": "We will improvise as things happen."
+    },
+    {
+      "expression": "low-key",
+      "meaning": "Somewhat, subtly, or in a relaxed, non-dramatic way",
+      "naturalUsage": "I'm low-key excited about starting this new project.",
+      "textbookAlternative": "I am moderately excited without wanting to show it too much."
+    },
+    {
+      "expression": "under the weather",
+      "meaning": "Feeling slightly ill or unwell",
+      "naturalUsage": "I was feeling a bit under the weather yesterday, but I'm good now.",
+      "textbookAlternative": "I was slightly sick yesterday."
+    },
+    {
+      "expression": "hit the ground running",
+      "meaning": "Start something immediately and with full energy",
+      "naturalUsage": "We need to hit the ground running with this launch.",
+      "textbookAlternative": "We must begin quickly and efficiently."
+    }
+  ]
+}

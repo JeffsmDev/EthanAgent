@@ -1,0 +1,23 @@
+{
+  "name": "teacher-english-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Native English Tutor - Web Application",
+  "scripts": {
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev": "pnpm --parallel --filter backend --filter frontend dev",
+    "build": "pnpm --filter backend build && pnpm --filter frontend build",
+    "start": "pnpm --filter backend start"
+  },
+  "packageManager": "pnpm@10.31.0",
+  "keywords": [
+    "ai",
+    "english-teacher",
+    "speech",
+    "react",
+    "node"
+  ],
+  "author": "Jefferson",
+  "license": "MIT"
+}

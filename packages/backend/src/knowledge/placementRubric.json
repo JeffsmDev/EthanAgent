@@ -1,0 +1,47 @@
+{
+  "description": "Adaptive CEFR assessment criteria for spontaneous spoken English",
+  "levels": {
+    "A1_A2": {
+      "name": "Beginner / Elementary",
+      "indicators": "Struggles with basic past tense, isolated vocabulary, frequent Spanish syntax, literal translation, very hesitant.",
+      "focus": "High-frequency sentence patterns, basic daily routines, eliminating literal translations."
+    },
+    "B1": {
+      "name": "Intermediate (Threshold)",
+      "indicators": "Can maintain a conversation, understands the gist, but vocabulary is repetitive (good, bad, very, important). Relies heavily on simple sentences. Struggles with nuance and idioms.",
+      "focus": "Phrasal verbs, connecting clauses (although, even though, since), reducing textbook language."
+    },
+    "B2": {
+      "name": "Upper Intermediate (Vantage)",
+      "indicators": "Fluent and clear. Makes occasional grammatical slips under pressure. Understands fast speech. Uses some idioms, but still lacks native colloquial flow and rhythm.",
+      "focus": "Polishing natural collocations, advanced idiomatic expressions, rapid conversational cadence."
+    },
+    "C1": {
+      "name": "Advanced (Effective Operational Proficiency)",
+      "indicators": "Expresses ideas smoothly with almost no hesitation. High range of idioms and colloquialisms. Great understanding of cultural references and subtle humor.",
+      "focus": "Fine-tuning accent, regional variations, high-stakes negotiation or executive English."
+    }
+  },
+  "testStages": [
+    {
+      "step": 1,
+      "name": "Icebreaker & Background",
+      "prompt": "Casual question about the user's day, job, or hobbies to check baseline fluency and sentence construction."
+    },
+    {
+      "step": 2,
+      "name": "Opinion & Argumentation",
+      "prompt": "Ask the user's opinion on a relatable situation or dilemma (e.g., remote work vs office, living in a big city vs quiet town) to test connectors and complex clauses."
+    },
+    {
+      "step": 3,
+      "name": "Spontaneous Scenario / Reaction",
+      "prompt": "A quick situational roleplay (e.g. resolving a misunderstanding or explaining a challenge) to assess real-time vocabulary and natural reaction."
+    },
+    {
+      "step": 4,
+      "name": "Diagnostic Summary & Level Assessment",
+      "prompt": "Assign CEFR level, praise strengths, and list top 3 priority areas for the daily 15-30 min sessions."
+    }
+  ]
+}
