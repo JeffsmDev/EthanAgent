@@ -24,7 +24,9 @@ import {
   Timer,
   Target,
   LogOut,
-  User
+  User,
+  MessageCircle,
+  BarChart3
 } from 'lucide-react';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
@@ -168,6 +170,8 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
   const [showSpanish, setShowSpanish] = useState(() => readPref('showSpanish', 'true') === 'true');
   const [silenceMode, setSilenceMode] = useState(() => readPref('silenceMode', '4000'));
   const [levelBusy, setLevelBusy] = useState(false);
+  // Solo en móvil (CSS): chat a pantalla completa o panel de progreso. En escritorio se ven ambos
+  const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat');
   // Correcciones de la sesión en curso, para el resumen al cerrarla
   const sessionUpgradesRef = useRef<NativeUpgrade[]>([]);
 
@@ -442,6 +446,7 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
       }
       stopAudio();
       await rotateSession();
+      setMobileView('chat');
       setDiagnostic(data.diagnostic);
       setMode('daily_session');
       const saved = await loadProgress();
@@ -481,6 +486,7 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
     setDiagnostic(null);
     setMode('placement');
     setTestStep(1);
+    setMobileView('chat');
     setMessages([PLACEMENT_WELCOME]);
     if (PLACEMENT_WELCOME.spokenText) playAudio(PLACEMENT_WELCOME.spokenText);
     await loadProgress();
@@ -672,7 +678,7 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
             <span style={{ fontSize: '22px' }}>🎙️</span>
           </div>
           <div className="brand-title">
-            <h1>Ethan • Native English Coach</h1>
+            <h1>Ethan<span className="brand-long"> • Native English Coach</span></h1>
             <p>Lexical Immersion & Active Recasting • Engine: {activeEngine}</p>
           </div>
         </div>
@@ -695,17 +701,19 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
 
           <button className="metric-pill pill-button" onClick={handleEndSession} disabled={loading || booting} title="Save this session to your history">
             <Square size={13} />
-            <span>End session</span>
+            <span>End<span className="label-long"> session</span></span>
           </button>
+        </div>
 
+        {/* Cuenta: en móvil queda arriba a la derecha, siempre visible */}
+        <div className="header-account">
           <div className="metric-pill user-pill" title={user.isAdmin ? 'Admin' : 'Student'}>
             <User size={14} color="var(--color-native)" />
             <strong>{user.name}</strong>
           </div>
-
-          <button className="metric-pill pill-button" onClick={handleLogout} disabled={loading} title="Sign out · Cerrar sesión">
+          <button className="metric-pill pill-button" onClick={handleLogout} disabled={loading} title="Sign out · Cerrar sesión" aria-label="Sign out">
             <LogOut size={13} />
-            <span>Sign out</span>
+            <span className="label-long">Sign out</span>
           </button>
         </div>
       </header>
@@ -720,8 +728,20 @@ export function App({ user, onLogout, onSessionExpired }: AppProps) {
         </div>
       )}
 
+      {/* Móvil: pestañas Chat / Progreso (en escritorio el CSS las oculta y muestra ambas columnas) */}
+      <nav className="mobile-tabs" role="tablist">
+        <button role="tab" aria-selected={mobileView === 'chat'} className={mobileView === 'chat' ? 'active' : ''} onClick={() => setMobileView('chat')}>
+          <MessageCircle size={16} />
+          <span>Chat</span>
+        </button>
+        <button role="tab" aria-selected={mobileView === 'panel'} className={mobileView === 'panel' ? 'active' : ''} onClick={() => setMobileView('panel')}>
+          <BarChart3 size={16} />
+          <span>{mode === 'placement' && !diagnostic ? `Test ${testStep}/4 · Nivel` : 'Progreso'}</span>
+        </button>
+      </nav>
+
       {/* Main Grid */}
-      <div className="main-grid">
+      <div className="main-grid" data-view={mobileView}>
         {/* Stage & Chat Area */}
         <div className="stage-container">
           {/* Visualizer Wave */}

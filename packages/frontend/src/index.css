@@ -50,6 +50,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* dvh = alto visible real en móvil (sin la barra del navegador) */
+  height: 100dvh;
   max-width: 1280px;
   margin: 0 auto;
   padding: 16px 24px;
@@ -100,17 +102,36 @@ body {
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand-title {
+  min-width: 0;
+}
+
+.brand-section {
+  min-width: 0;
 }
 
 .brand-title p {
   font-size: 0.8rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-header {
+  gap: 16px;
 }
 
 .session-metrics {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .metric-pill {
@@ -123,6 +144,8 @@ body {
   border-radius: var(--radius-full);
   font-size: 0.85rem;
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .level-tag {
@@ -140,11 +163,6 @@ body {
   min-height: 0;
 }
 
-@media (max-width: 960px) {
-  .main-grid {
-    grid-template-columns: 1fr;
-  }
-}
 
 /* Chat & Voice Stage */
 .stage-container {
@@ -1264,10 +1282,266 @@ body {
 }
 
 /* Usuario conectado en la cabecera */
+.header-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+}
+
 .user-pill {
   gap: 8px;
 }
 
 .user-pill strong {
   font-weight: 600;
+}
+
+/* ── Móvil y tablet (≤ 960px) ───────────────────────────────
+   Una columna a pantalla completa: pestañas Chat / Progreso, el chat ocupa todo el alto
+   con el micrófono abajo, y la cabecera se compacta en una fila de chips deslizable */
+.mobile-tabs {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .app-container {
+    padding: 8px 10px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-bottom: 0;
+  }
+
+  /* Marca y cuenta en la 1ª fila, chips de la sesión en la 2ª */
+  .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'brand account' 'metrics metrics';
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-md);
+  }
+
+  .brand-section {
+    grid-area: brand;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .brand-title {
+    min-width: 0;
+  }
+
+  .header-account {
+    grid-area: account;
+    margin-left: 0;
+    gap: 6px;
+  }
+
+  .avatar-badge {
+    width: 34px;
+    height: 34px;
+  }
+
+  .avatar-badge span {
+    font-size: 17px !important;
+  }
+
+  .brand-title h1 {
+    font-size: 1rem;
+  }
+
+  .brand-title p {
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Chips en una fila deslizable: nunca ensanchan la página */
+  .session-metrics {
+    grid-area: metrics;
+    /* Degradado en el borde derecho: indica que la fila se desliza */
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  .session-metrics::-webkit-scrollbar {
+    display: none;
+  }
+
+  .metric-pill {
+    flex-shrink: 0;
+    white-space: nowrap;
+    gap: 6px;
+    padding: 6px 11px;
+    font-size: 0.78rem;
+  }
+
+  .engine-banner {
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+  }
+
+  .mobile-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-full);
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .mobile-tabs button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+  }
+
+  .mobile-tabs button.active {
+    background: var(--accent-primary);
+    color: #fff;
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+
+  .main-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .main-grid[data-view='chat'] .side-panel,
+  .main-grid[data-view='panel'] .stage-container {
+    display: none;
+  }
+
+  .stage-container {
+    min-height: 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    border-bottom: none;
+  }
+
+  .side-panel {
+    min-height: 0;
+    gap: 10px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+
+  .panel-card {
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .voice-visualizer {
+    height: 40px;
+    padding: 0 8px;
+  }
+
+  .voice-visualizer > span {
+    font-size: 0.72rem !important;
+    line-height: 1.25;
+    margin-left: 8px !important;
+  }
+
+  .messages-viewport {
+    padding: 12px 10px;
+    gap: 12px;
+    overscroll-behavior: contain;
+  }
+
+  .message-bubble {
+    max-width: 92%;
+    padding: 11px 13px;
+    font-size: 0.93rem;
+  }
+
+  .upgrade-card {
+    padding: 10px;
+  }
+
+  .upgrade-row {
+    flex-wrap: wrap;
+  }
+
+  .control-dock {
+    padding: 10px 10px 8px;
+    gap: 10px;
+  }
+
+  .mic-button {
+    width: 54px;
+    height: 54px;
+  }
+
+  /* 16px en campos de texto: evita que iOS haga zoom al enfocarlos */
+  .chat-input,
+  .toggle-chip select,
+  .engine-select {
+    font-size: 16px;
+  }
+
+  .chat-input {
+    padding: 13px 48px 13px 16px;
+  }
+
+  .send-button {
+    padding: 10px;
+  }
+
+  .dock-settings {
+    padding: 0 10px max(10px, env(safe-area-inset-bottom));
+    gap: 6px;
+  }
+
+  .toggle-chip {
+    min-height: 34px;
+  }
+
+  .start-card h2 {
+    font-size: 1.2rem;
+  }
+
+  .usage-table {
+    font-size: 0.72rem;
+  }
+
+  .mic-button:hover {
+    transform: none;
+  }
+}
+
+/* Teléfonos estrechos: textos largos fuera */
+@media (max-width: 480px) {
+  .brand-long,
+  .label-long {
+    display: none;
+  }
+
+  .brand-title p {
+    display: none;
+  }
 }
