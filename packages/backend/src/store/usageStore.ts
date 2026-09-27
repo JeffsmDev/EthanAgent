@@ -9,6 +9,7 @@ export interface UsageRecord {
   provider: ProviderName;
   model: string;
   sessionId: string | null;
+  userId?: string | null;
   latencyMs: number;
   ok: boolean;
   errorCode: string | null;
@@ -60,6 +61,7 @@ export class UsageStore {
     provider: ProviderName;
     model: string;
     sessionId?: string | null;
+    userId?: string | null;
     latencyMs: number;
     usage?: EngineUsage | null;
     errorCode?: string | null;
@@ -69,6 +71,7 @@ export class UsageStore {
       provider: entry.provider,
       model: entry.model,
       sessionId: entry.sessionId ?? null,
+      userId: entry.userId ?? null,
       latencyMs: Math.round(entry.latencyMs),
       ok: !entry.errorCode,
       errorCode: entry.errorCode ?? null,

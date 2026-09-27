@@ -22,11 +22,13 @@ import {
   Loader2,
   Languages,
   Timer,
-  Target
+  Target,
+  LogOut,
+  User
 } from 'lucide-react';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
-import type { DiagnosticResult, Message, NativeUpgrade, UserProgress } from './types';
+import type { AuthUser, DiagnosticResult, Message, NativeUpgrade, UserProgress } from './types';
 import { UpgradeCard } from './components/UpgradeCard';
 import { DiagnosticGuide } from './components/DiagnosticGuide';
 import { LevelCard } from './components/LevelCard';
@@ -108,18 +110,18 @@ const PLACEMENT_WELCOME: Message = {
   spanish: '¡Hola, bienvenido! Soy Ethan, tu coach de inglés nativo. Empecemos con un diagnóstico rápido de 4 etapas para conocer tu nivel real. Cuéntame un poco sobre ti: ¿a qué te dedicas y qué te trae por aquí hoy?'
 };
 
-function buildReturningWelcome(progress: UserProgress): Message {
+function buildReturningWelcome(progress: UserProgress, name: string): Message {
   const theme = progress.diagnostic?.firstSessionRecommendedTheme;
   const weak = progress.weakPoints[0];
   const text = [
-    `Welcome back! You're working at ${progress.cefrLevel} level, so let's pick up right where we left off.`,
+    `Welcome back, ${name}! You're working at ${progress.cefrLevel} level, so let's pick up right where we left off.`,
     weak
       ? `${weak.count > 1 ? `"${weak.original}" has come up ${weak.count} times` : `Last time, "${weak.original}" came up`}—keep an ear out for "${weak.native}" today.`
       : '',
     theme ? `Today's focus: ${theme}. So, how's your day been so far?` : "So, how's your day been so far?"
   ].filter(Boolean).join(' ');
   const spanish = [
-    `¡Bienvenido de nuevo! Estás en nivel ${progress.cefrLevel}, así que sigamos donde lo dejamos.`,
+    `¡Hola de nuevo, ${name}! Estás en nivel ${progress.cefrLevel}, así que sigamos donde lo dejamos.`,
     weak ? `Recuerda: en lugar de "${weak.original}", di "${weak.native}".` : '',
     theme ? `Enfoque de hoy: ${theme}. ¿Qué tal tu día hasta ahora?` : '¿Qué tal tu día hasta ahora?'
   ].filter(Boolean).join(' ');
@@ -134,7 +136,13 @@ function newSessionId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export function App() {
+interface AppProps {
+  user: AuthUser;
+  onLogout: () => void;
+  onSessionExpired: () => void;
+}
+
+export function App({ user, onLogout, onSessionExpired }: AppProps) {
   const [booting, setBooting] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -170,6 +178,13 @@ export function App() {
   const practiceSecondsRef = useRef(0);
   practiceSecondsRef.current = practiceSeconds;
 
+  // fetch a la API: un 401 significa que la sesión caducó → vuelta al login
+  const apiFetch = async (input: string, init?: RequestInit): Promise<Response> => {
+    const res = await fetch(input, init);
+    if (res.status === 401) onSessionExpired();
+    return res;
+  };
+
   // Timer de la sesión: corre desde que el usuario pulsa "Start session"
   useEffect(() => {
     if (!started) return;
@@ -181,7 +196,7 @@ export function App() {
 
   const loadProgress = async (): Promise<UserProgress | null> => {
     try {
-      const res = await fetch('/api/user/progress');
+      const res = await apiFetch('/api/user/progress');
       if (!res.ok) return null;
       const data: UserProgress = await res.json();
       setProgress(data);
@@ -193,7 +208,7 @@ export function App() {
 
   const loadEngines = async () => {
     try {
-      const res = await fetch('/api/engines');
+      const res = await apiFetch('/api/engines');
       if (!res.ok) return;
       const data: { current: EngineStatus; options: EngineOption[] } = await res.json();
       setEngineOptions(data.options);
@@ -205,7 +220,7 @@ export function App() {
 
   const loadUsage = async () => {
     try {
-      const res = await fetch('/api/usage');
+      const res = await apiFetch('/api/usage');
       if (!res.ok) return;
       const data: { summary: UsageSummary[] } = await res.json();
       setUsageSummary(data.summary.filter(s => s.provider !== 'mock'));
@@ -218,7 +233,7 @@ export function App() {
     if (provider === currentProvider || pendingProvider) return;
     setPendingProvider(provider);
     try {
-      const res = await fetch('/api/engine', {
+      const res = await apiFetch('/api/engine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider })
@@ -261,7 +276,7 @@ export function App() {
       if (saved?.cefrLevel && saved.diagnostic) {
         setDiagnostic(saved.diagnostic);
         setMode('daily_session');
-        setMessages([buildReturningWelcome(saved)]);
+        setMessages([buildReturningWelcome(saved, user.name)]);
       } else {
         setMessages([PLACEMENT_WELCOME]);
       }
@@ -362,7 +377,7 @@ export function App() {
     let savedMinutes: number | null = null;
     if (sessionTurnsRef.current > 0) {
       try {
-        const res = await fetch('/api/user/session/end', {
+        const res = await apiFetch('/api/user/session/end', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -382,6 +397,13 @@ export function App() {
     setPracticeSeconds(0);
     setSessionCost(0);
     return savedMinutes;
+  };
+
+  // Guarda la sesión en curso antes de salir para que no se pierda el tiempo practicado
+  const handleLogout = async () => {
+    stopAudio();
+    await rotateSession();
+    onLogout();
   };
 
   const handleEndSession = async () => {
@@ -408,7 +430,7 @@ export function App() {
     if (source === 'manual' && !window.confirm(`¿Usar ${level} como tu nivel? Ethan adaptará las sesiones a ese nivel.`)) return;
     setLevelBusy(true);
     try {
-      const res = await fetch('/api/user/level', {
+      const res = await apiFetch('/api/user/level', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ level, source })
@@ -427,7 +449,7 @@ export function App() {
         addSystemMessage(`🎉 ¡Subiste a ${level}! Ethan te hablará con vocabulario y retos de ${level}. Tu barra de progreso empieza de nuevo hacia el siguiente nivel.`);
       }
       if (saved) {
-        const welcome = buildReturningWelcome(saved);
+        const welcome = buildReturningWelcome(saved, user.name);
         setMessages(prev => [...prev, welcome]);
         setStarted(true);
         if (welcome.spokenText) playAudio(welcome.spokenText);
@@ -448,7 +470,7 @@ export function App() {
     stopAudio();
     await rotateSession();
     try {
-      await fetch('/api/user/reset', {
+      await apiFetch('/api/user/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scope })
@@ -487,7 +509,7 @@ export function App() {
           content: m.text
         }));
 
-      const res = await fetch('/api/chat', {
+      const res = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -605,7 +627,7 @@ export function App() {
     }
     setTranscribing(true);
     try {
-      const res = await fetch('/api/voice/transcribe', {
+      const res = await apiFetch('/api/voice/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'audio/wav' },
         body: result.wav
@@ -674,6 +696,16 @@ export function App() {
           <button className="metric-pill pill-button" onClick={handleEndSession} disabled={loading || booting} title="Save this session to your history">
             <Square size={13} />
             <span>End session</span>
+          </button>
+
+          <div className="metric-pill user-pill" title={user.isAdmin ? 'Admin' : 'Student'}>
+            <User size={14} color="var(--color-native)" />
+            <strong>{user.name}</strong>
+          </div>
+
+          <button className="metric-pill pill-button" onClick={handleLogout} disabled={loading} title="Sign out · Cerrar sesión">
+            <LogOut size={13} />
+            <span>Sign out</span>
           </button>
         </div>
       </header>
@@ -906,7 +938,8 @@ export function App() {
             <select
               className="engine-select"
               value={pendingProvider ?? currentProvider}
-              disabled={!!pendingProvider || loading}
+              disabled={!user.isAdmin || !!pendingProvider || loading}
+              title={user.isAdmin ? '' : 'Only the admin can switch the engine'}
               onChange={e => switchEngine(e.target.value)}
             >
               {engineOptions.map(o => (

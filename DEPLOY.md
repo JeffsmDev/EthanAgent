@@ -21,6 +21,7 @@ pnpm start        # http://localhost:4000
 
 | Variable | Valores | Notas |
 |---|---|---|
+| `AUTH_USERS` | `Nombre:clave,Nombre:clave` | Usuarios del login; el **primero es admin** (único que cambia el motor IA). Cada uno tiene su progreso en `data/users/<nombre>/`. Sin esto nadie puede entrar |
 | `AI_PROVIDER` | `claude` \| `gemini` \| `ollama` \| `mock` | Motor por defecto. Se cambia en caliente desde la UI (tarjeta *AI Engine & Cost*) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | salida de `claude setup-token` | Usa tu suscripción de Claude (Pro/Max) sin API key. En tu PC basta con tener sesión en `claude` |
 | `CLAUDE_MODEL` | `claude-sonnet-5` / `claude-haiku-4-5-20251001` | Sonnet: más natural. Haiku: ~2,5× más barato |
@@ -103,10 +104,14 @@ Opciones: `--mode pm2` (sin Docker: Node 22 + pnpm + PM2 en el host), `--app-por
 
 > En modo PM2 la app **nunca corre como root**: usa el dueño del repo o, si el repo es de root, el usuario de sistema `ethan` (los comandos de arriba asumen este caso). Por eso el repo debe estar en `/opt/ethan` y no dentro de `/root`.
 
-### 2.4 Proteger el acceso (recomendado)
+### 2.4 Proteger el acceso
 
-La app no tiene login: cualquiera con la URL puede usarla (y gastar tu cuota de Gemini) o resetear tu progreso.
-Activa usuario/contraseña en Nginx:
+La app tiene login propio (usuarios en `AUTH_USERS`, sesión de 30 días en cookie HttpOnly firmada; 10 fallos por IP
+bloquean el login 15 min) y el firewall limita el acceso por IP. Para añadir/quitar usuarios: editar `AUTH_USERS` y reiniciar.
+Al cambiar una contraseña, las sesiones abiertas siguen valiendo hasta caducar; para cerrarlas todas, borra
+`data/auth-secret` (o cambia `AUTH_SECRET`) y reinicia. El `progress.json` antiguo (mono-usuario) se migra solo al primer usuario.
+
+Opcional, capa extra en Nginx:
 
 ```bash
 sudo apt install -y apache2-utils

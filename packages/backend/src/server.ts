@@ -6,13 +6,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSystemPrompt, SessionMode, UserProgressContext } from './agents/tutorPrompt.js';
 import { parseTutorResponse } from './agents/responseParser.js';
-import { ProgressStore, isValidSessionId, ResetScope } from './store/progressStore.js';
+import { UserProgressStores, isValidSessionId, ResetScope } from './store/progressStore.js';
 import { UsageStore } from './store/usageStore.js';
 import { ChatMessage } from './engines/aiProvider.js';
 import { EngineRegistry, engineConfigFromEnv } from './engines/engineFactory.js';
 import { EngineError, withResilience } from './engines/engineErrors.js';
 import { EdgeTtsService } from './voice/edgeTtsService.js';
 import { WhisperSttService } from './voice/sttService.js';
+import { AuthService, AuthUser } from './auth/authService.js';
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // .env de packages/backend sin depender del cwd (pnpm, PM2, node directo). Las variables ya definidas (Docker/PM2) mandan
@@ -21,7 +22,8 @@ dotenv.config({ path: path.join(backendRoot, '.env') });
 const app = express();
 const PORT = process.env.PORT || 4000;
 const dataDir = process.env.DATA_DIR || path.join(backendRoot, 'data');
-const progressStore = new ProgressStore(dataDir);
+const auth = new AuthService(dataDir);
+const progressStores = new UserProgressStores(dataDir, auth.adminId);
 const usageStore = new UsageStore(dataDir);
 
 const MAX_MESSAGE_CHARS = 2000;
@@ -29,6 +31,9 @@ const MAX_HISTORY_MESSAGES = 24;
 const MAX_HISTORY_CHARS = 4000;
 const MAX_TTS_CHARS = 1500;
 
+// Detrás de Nginx: req.secure/req.ip salen de X-Forwarded-* (cookie Secure en HTTPS, bloqueo de login por IP real)
+// loopback = PM2; uniquelocal = Docker (Nginx del host llega por el bridge 172.x). El puerto solo escucha en 127.0.0.1
+app.set('trust proxy', ['loopback', 'uniquelocal']);
 app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
@@ -56,7 +61,35 @@ function sanitizeHistory(history: unknown): ChatMessage[] {
     .map(m => ({ role: m.role, content: m.content.slice(0, MAX_HISTORY_CHARS) }));
 }
 
-// Health Check
+// Usuario autenticado de la petición (puesto por auth.requireUser)
+const currentUser = (res: Response): AuthUser => res.locals.user as AuthUser;
+
+// Login: cookie HttpOnly firmada. Mensaje genérico para no revelar si el usuario existe
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  const ip = req.ip || 'unknown';
+  if (auth.isLockedOut(ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.', code: 'LOCKED' });
+  }
+  const user = auth.verify(req.body?.username, req.body?.password, ip);
+  if (!user) {
+    return res.status(401).json({ error: 'Wrong username or password.', code: 'BAD_CREDENTIALS' });
+  }
+  auth.setSessionCookie(req, res, user);
+  res.json({ user });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  auth.clearSessionCookie(req, res);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const user = auth.userFromRequest(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.', code: 'UNAUTHENTICATED' });
+  res.json({ user });
+});
+
+// Health Check (público: lo usan el smoke test y la monitorización)
 app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
   const engine = await engines.currentStatus();
   res.json({
@@ -70,12 +103,15 @@ app.get('/api/health', asyncRoute(async (req: Request, res: Response) => {
   });
 }));
 
+// A partir de aquí toda la API exige sesión
+app.use('/api', auth.requireUser);
+
 // Motores elegibles. Solo se puede elegir entre los que el servidor ya tiene configurados: nunca se aceptan keys
 app.get('/api/engines', asyncRoute(async (req: Request, res: Response) => {
   res.json({ current: await engines.currentStatus(), options: engines.options() });
 }));
 
-app.post('/api/engine', asyncRoute(async (req: Request, res: Response) => {
+app.post('/api/engine', auth.requireAdmin, asyncRoute(async (req: Request, res: Response) => {
   try {
     const selected = await engines.select(String(req.body?.provider || ''));
     res.json({ current: await engines.currentStatus(), options: engines.options() });
@@ -94,13 +130,14 @@ app.get('/api/usage', (req: Request, res: Response) => {
   res.json({ summary: usageStore.summary(since), recent: usageStore.recent(Number(req.query.limit) || 50) });
 });
 
-app.post('/api/usage/reset', asyncRoute(async (req: Request, res: Response) => {
+app.post('/api/usage/reset', auth.requireAdmin, asyncRoute(async (req: Request, res: Response) => {
   await usageStore.reset();
   res.json({ message: 'Usage history reset' });
 }));
 
 // Chat conversacional con el tutor
 app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
+  const progressStore = progressStores.forUser(currentUser(res).id);
   const {
     message,
     history,
@@ -157,7 +194,7 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
     );
     const latencyMs = Date.now() - startedAt;
     const rawResponse = result.text;
-    usageStore.record({ provider: engine.provider, model: result.model, sessionId: usageSessionId, latencyMs, usage: result.usage })
+    usageStore.record({ provider: engine.provider, model: result.model, sessionId: usageSessionId, userId: currentUser(res).id, latencyMs, usage: result.usage })
       .catch(err => console.error('Error registrando consumo:', err));
 
     engines.noteTurn(engine.provider);
@@ -213,7 +250,7 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
       console.error(`Error del motor en /api/chat: ${error.message}`);
       engines.noteTurn(engine.provider, error);
       // Los fallos también cuentan al comparar motores (fiabilidad)
-      usageStore.record({ provider: engine.provider, model: engine.model, sessionId: usageSessionId, latencyMs: Date.now() - startedAt, errorCode: error.code })
+      usageStore.record({ provider: engine.provider, model: engine.model, sessionId: usageSessionId, userId: currentUser(res).id, latencyMs: Date.now() - startedAt, errorCode: error.code })
         .catch(err => console.error('Error registrando consumo:', err));
       // 503 = servicio de IA no disponible; el frontend muestra friendlyMessage y el usuario puede reintentar
       return res.status(503).json({ error: error.friendlyMessage, code: error.code, retryable: error.retryable });
@@ -225,6 +262,7 @@ app.post('/api/chat', asyncRoute(async (req: Request, res: Response) => {
 
 // Progreso del usuario: nivel CEFR, historial de sesiones y Native Upgrades acumulados
 app.get('/api/user/progress', (req: Request, res: Response) => {
+  const progressStore = progressStores.forUser(currentUser(res).id);
   const progress = progressStore.getProgress();
   const sessions = [...progress.sessions].reverse();
   res.json({
@@ -245,6 +283,7 @@ app.get('/api/user/progress', (req: Request, res: Response) => {
 
 // Fijar el nivel a mano (sin test) o subir de nivel cuando el progreso lo permite
 app.post('/api/user/level', asyncRoute(async (req: Request, res: Response) => {
+  const progressStore = progressStores.forUser(currentUser(res).id);
   const current = progressStore.getLevelProgress();
   const levelUp = req.body?.source === 'level-up';
   if (levelUp && !(current?.readyToLevelUp && current.nextLevel === req.body?.level)) {
@@ -259,6 +298,7 @@ app.post('/api/user/level', asyncRoute(async (req: Request, res: Response) => {
 
 // scope 'level' = repetir solo el diagnóstico; 'all' (default) = borrar todo el progreso
 app.post('/api/user/reset', asyncRoute(async (req: Request, res: Response) => {
+  const progressStore = progressStores.forUser(currentUser(res).id);
   const scope: ResetScope = req.body?.scope === 'level' ? 'level' : 'all';
   await progressStore.reset(scope);
   res.json({ message: scope === 'level' ? 'Diagnostic reset' : 'All progress reset', scope });
@@ -267,6 +307,7 @@ app.post('/api/user/reset', asyncRoute(async (req: Request, res: Response) => {
 // Cierre de sesión (botón o navigator.sendBeacon al cerrar la pestaña)
 // sendBeacon envía text/plain (tipo CORS-safelisted), por eso esta ruta acepta también texto
 app.post('/api/user/session/end', express.text({ type: 'text/plain' }), asyncRoute(async (req: Request, res: Response) => {
+  const progressStore = progressStores.forUser(currentUser(res).id);
   let body = req.body || {};
   if (typeof body === 'string') {
     try {
@@ -392,6 +433,7 @@ process.on('unhandledRejection', reason => {
 const server = app.listen(PORT, () => {
   console.log(`🚀 Tutor English Backend iniciado en http://localhost:${PORT}`);
   const { status } = engines.current;
+  console.log(`👥 Usuarios: ${auth.userIds.join(', ') || '(ninguno — revisa AUTH_USERS)'}`);
   console.log(`🧠 Motor de IA activo: ${status.engineName}${status.warning ? ` — ${status.warning}` : ''}`);
 });
 

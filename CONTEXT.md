@@ -6,13 +6,14 @@
 
 Web app para aprender a **hablar inglés nativo** con **Ethan**, un tutor conversacional por voz:
 diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con corrección
-*Active Recasting* (tarjeta "Native Upgrade"). Usuario objetivo: hispanohablante. App **mono-usuario** (sin login).
+*Active Recasting* (tarjeta "Native Upgrade"). Usuario objetivo: hispanohablante. **Login para pocos usuarios fijos** (Jefferson = admin, Linda, demo), cada uno con su progreso.
 
 ## Decisiones de arquitectura
 
 | Decisión | Elección | Por qué |
 |---|---|---|
-| Persistencia | JSON en `packages/backend/data/progress.json` con escritura atómica (tmp + rename) y cola de escritura serializada | Un solo usuario y datos pequeños. `better-sqlite3` exige compilación nativa (Windows dev + Alpine Docker) sin aportar valor a esta escala |
+| Autenticación | Usuarios fijos en `AUTH_USERS` (.env) con scrypt en memoria + cookie HttpOnly firmada (HMAC, 30 días), sin estado en servidor | 3 usuarios que no van a crecer y acceso ya filtrado por IP: una BD de usuarios no aporta nada |
+| Persistencia | JSON por usuario en `packages/backend/data/users/<id>/progress.json` (antes `data/progress.json`, migrado al admin) con escritura atómica (tmp + rename) y cola de escritura serializada | Un solo usuario y datos pequeños. `better-sqlite3` exige compilación nativa (Windows dev + Alpine Docker) sin aportar valor a esta escala |
 | Parseo de respuestas del tutor | Backend (`responseParser.ts`) | Única fuente de verdad; el backend necesita los upgrades para persistirlos |
 | Duración de sesión | El backend registra la sesión en cada `/api/chat` (upsert por `sessionId`) y el frontend la cierra con `sendBeacon` | No se pierde la sesión aunque se cierre la pestaña |
 | Motor IA sin API key | Arranca en **mock** con aviso visible en la UI | Nunca crashea; el usuario sabe qué configurar |
@@ -21,7 +22,7 @@ diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con 
 ## Riesgos conocidos
 
 - `gemini-2.0-flash` puede estar retirado por Google a la fecha; si responde 404, cambiar `GEMINI_MODEL` (p. ej. `gemini-2.5-flash`).
-- Sin autenticación: en una VPS pública cualquiera con la URL puede usar/resetear el progreso. Mitigación: basic auth en Nginx (plantilla incluida, comentada).
+- El motor IA y el historial de costes son globales (compartidos por los usuarios); solo el admin puede cambiarlos.
 
 ## Bitácora de fases
 
@@ -40,8 +41,10 @@ diagnóstico CEFR adaptativo de 4 pasos → sesiones diarias de 15–30 min con 
 
 | H — Aprendizaje guiado para hispanohablantes | ✅ | Formato de Ethan: `[SPOKEN RESPONSE]` + `[SPANISH]` (traducción) + `[NATIVE UPGRADE]` con 🗣️ pronunciación y 🇪🇸 explicación + `[STEP_STATUS]` (test: `repeat` si la respuesta no basta → la etapa no avanza) + `[SCORES]` (práctica: fluidez/vocabulario/gramática 1-5 vs nivel actual). Nivel manual (`POST /api/user/level`) y barra de progreso al siguiente nivel (media ≥ 4,3 en 30 respuestas → botón de subir). Grabación: pausa configurable 2/4/6 s o manual con cuenta atrás, hasta 2 min (Nginx `client_max_body_size 10m`). Resumen al cerrar sesión. Botones 🔊/🐌 para escuchar la frase correcta. Coste Sonnet sube a ~$0,012-0,018/turno por el español |
 
+| I — Login multiusuario | ✅ | `auth/authService.ts` + `LoginScreen`/`AuthGate`. 3 usuarios de `AUTH_USERS`, progreso separado por usuario (migración automática del JSON antiguo al admin), `usage.json` guarda `userId`. Motor y reset de costes solo admin (403). Rate limit de login por IP (`trust proxy` loopback + bridge Docker). Smoke test: `--login usuario:clave`. Verificado: login/logout, cookie falsificada → 401, aislamiento Linda/demo, smoke 10/10 |
+
 ## Pendiente / siguientes pasos
 
 - Generar `CLAUDE_CODE_OAUTH_TOKEN` en la VPS (`ssh -t vps-agent "~/.local/bin/claude setup-token"`) y guardarlo con `sudo bash /opt/ethan/deploy/set-claude-token.sh`. La sesión interactiva de Claude de `claudeagent` está caducada (re-login con `claude` → `/login` si se quiere usar allí).
 - (Opcional) `GEMINI_API_KEY` gratuita de AI Studio para comparar costes con Claude y decidir motor.
-- Activar basic auth en Nginx (la app no tiene login).
+- VPS: añadir `AUTH_USERS=...` a `/opt/ethan/packages/backend/.env` al desplegar la fase I (sin él nadie puede entrar) y permitir en el firewall la IP del segundo usuario.

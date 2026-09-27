@@ -22,12 +22,13 @@ packages/backend    Node 22 + TS + Express (ESM, NodeNext → imports con extens
     engineErrors.ts        EngineError tipado + withResilience (timeout, backoff, cancelación)
   src/agents/tutorPrompt.ts    system prompt pedagógico (Lexical Approach + Active Recasting + STUDENT MEMORY)
   src/agents/responseParser.ts parseo único de [SPOKEN RESPONSE] / [NATIVE UPGRADE] / ```json
-  src/store/progressStore.ts   persistencia JSON (nivel CEFR, sesiones, Native Upgrades)
+  src/auth/authService.ts      login: usuarios de AUTH_USERS (.env, el 1º es admin), cookie HttpOnly firmada con HMAC
+  src/store/progressStore.ts   persistencia JSON por usuario (nivel CEFR, sesiones, Native Upgrades)
   src/store/usageStore.ts      historial de coste/latencia por turno y motor (data/usage.json)
   src/store/jsonFile.ts        helper de JSON con escritura atómica compartido por los stores
   src/voice/edgeTtsService.ts  TTS neuronal (msedge-tts). El texto SIEMPRE se escapa (SSML)
   src/voice/sttService.ts      voz → texto con whisper.cpp en el servidor (Docker). Sin él, el frontend usa Web Speech
-  data/progress.json       datos del usuario (gitignored, volumen en Docker)
+  data/users/<id>/progress.json  progreso de cada usuario (gitignored, volumen en Docker)
 packages/frontend   React 18 + Vite + CSS vanilla (proxy /api → :4000 en dev)
 Dockerfile, docker-compose.yml   imagen única (API + frontend), puerto solo en 127.0.0.1
 deploy/             nginx (plantilla), pm2 (ecosystem.config.cjs) y deploy.sh — guía en DEPLOY.md
@@ -46,6 +47,7 @@ pnpm start                   # producción: backend sirve API + frontend en :400
 
 - Formato de respuesta del tutor: `[SPOKEN RESPONSE]` (único texto que va a TTS) + `[SPANISH]` + `[NATIVE UPGRADE]` opcional (con Pronunciation y Explicación) + `[STEP_STATUS]` (test) o `[SCORES]` (práctica) + bloque ```json al cerrar el diagnóstico. El parseo vive en el backend (`src/agents/responseParser.ts`); no duplicarlo en el frontend.
 - Errores del motor IA → HTTP 503 con `{ code, friendlyMessage }`; el frontend los muestra, nunca crashea.
+- Toda ruta `/api` salvo `/api/health` y `/api/auth/*` exige sesión (`auth.requireUser`); el progreso se obtiene con `progressStores.forUser(currentUser(res).id)`, nunca de un id que mande el cliente. Acciones globales (motor, reset de costes) → `auth.requireAdmin`.
 - El backend debe correr como **una sola instancia** (el store JSON no es multi-proceso).
 - El cambio de motor (`POST /api/engine`) solo elige entre motores ya configurados en el servidor: **nunca** aceptar keys/tokens desde el cliente.
 - Todo motor nuevo devuelve `EngineResult` con `usage` (tokens + coste) para que el historial de costes siga siendo comparable.

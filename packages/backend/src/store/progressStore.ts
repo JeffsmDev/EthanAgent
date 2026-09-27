@@ -1,8 +1,9 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { DiagnosticData, NativeUpgrade, SkillScores } from '../agents/responseParser.js';
 import { JsonFile } from './jsonFile.js';
 
-// Persistencia ligera mono-usuario en JSON con escritura atómica (tmp + rename)
+// Persistencia ligera por usuario en JSON con escritura atómica (tmp + rename)
 
 export const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1'] as const;
 export type CefrLevel = (typeof CEFR_LEVELS)[number];
@@ -292,5 +293,37 @@ export class ProgressStore {
       this.data = emptyProgress();
     }
     await this.persist();
+  }
+}
+
+// Un progreso por usuario en data/users/<id>/progress.json (cada uno con su propia cola de escritura)
+export class UserProgressStores {
+  private readonly stores = new Map<string, ProgressStore>();
+
+  constructor(private readonly dataDir: string, legacyOwnerId: string | null) {
+    // Migración: el progress.json de la época mono-usuario pasa al administrador (el primer usuario)
+    const legacy = path.join(dataDir, 'progress.json');
+    if (legacyOwnerId && fs.existsSync(legacy)) {
+      const target = path.join(this.userDir(legacyOwnerId), 'progress.json');
+      if (!fs.existsSync(target)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.renameSync(legacy, target);
+        console.log(`📦 progress.json migrado al usuario "${legacyOwnerId}"`);
+      }
+    }
+  }
+
+  private userDir(userId: string): string {
+    return path.join(this.dataDir, 'users', userId);
+  }
+
+  // userId ya validado por AuthService (solo [a-z0-9_-])
+  forUser(userId: string): ProgressStore {
+    let store = this.stores.get(userId);
+    if (!store) {
+      store = new ProgressStore(this.userDir(userId));
+      this.stores.set(userId, store);
+    }
+    return store;
   }
 }
